@@ -102,3 +102,74 @@ export interface ProjectBackup {
   categories: Record<string, Category[]>;
   documents: Record<string, DocumentItem[]>;
 }
+
+export interface DirectoryVersion {
+  id: string;
+  volumeId: string;
+  name: string;
+  description: string;
+  createdAt: string;
+  documentSnapshots: {
+    id: string;
+    name: string;
+    categoryId: string;
+    categoryName: string;
+    order: number;
+    globalOrder: number;
+    pageNumber?: number;
+    filePages?: number;
+    notes?: string;
+    status: DocumentStatus;
+  }[];
+}
+
+export interface VersionDiffItem {
+  documentId: string;
+  documentName: string;
+  categoryName: string;
+  changeType: 'order' | 'page' | 'notes' | 'added' | 'removed' | 'category';
+  oldValue?: string | number;
+  newValue?: string | number;
+}
+
+export interface DuplicateFile {
+  id: string;
+  fileName: string;
+  fileType: FileType;
+  documentIds: string[];
+  documentNames: string[];
+  categoryNames: string[];
+}
+
+export interface MisplacedFile {
+  id: string;
+  documentId: string;
+  documentName: string;
+  currentCategoryId: string;
+  currentCategoryName: string;
+  suggestedCategoryId: string;
+  suggestedCategoryName: string;
+  reason: string;
+  confidence: number;
+}
+
+export type IssueType = 'missing' | '缺页' | '未编页码' | '页码重叠' | '日期倒挂' | '命名不规范' | '重复文件' | '错放分类';
+
+export interface IssueDetail {
+  id: string;
+  type: IssueType;
+  volumeId: string;
+  volumeName: string;
+  categoryId: string;
+  categoryName: string;
+  documentId: string;
+  documentName: string;
+  description: string;
+}
+
+export interface IssueSummary {
+  type: IssueType;
+  label: string;
+  count: number;
+  issues: IssueDetail[];
+}

@@ -19,7 +19,11 @@ import {
   CheckCircle,
   HelpCircle,
   ListChecks,
-  Layers
+  Layers,
+  Copy,
+  FileQuestion,
+  ArrowRight,
+  EyeOff
 } from 'lucide-react';
 import useProjectStore from '../store/useProjectStore';
 import StatusBadge from '../components/StatusBadge';
@@ -47,6 +51,11 @@ const VolumeListPage: React.FC = () => {
     removePendingUpload,
     clearPendingUploads,
     updatePendingMatch,
+    detectDuplicates,
+    detectMisplacements,
+    ignoreDuplicate,
+    ignoreMisplacement,
+    moveDocumentToCategory,
   } = useProjectStore();
 
   const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set());
@@ -63,6 +72,7 @@ const VolumeListPage: React.FC = () => {
   const [showBatchUpload, setShowBatchUpload] = useState(false);
   const [batchDragOver, setBatchDragOver] = useState(false);
   const [selectedPendingId, setSelectedPendingId] = useState<string | null>(null);
+  const [showIssuesPanel, setShowIssuesPanel] = useState(true);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const batchFileInputRef = useRef<HTMLInputElement>(null);
@@ -98,6 +108,36 @@ const VolumeListPage: React.FC = () => {
   }
 
   const stats = getProjectStats(currentProjectId);
+
+  const duplicates = useMemo(() => {
+    if (!currentVolumeId) return [];
+    return detectDuplicates(currentVolumeId);
+  }, [currentVolumeId, detectDuplicates]);
+
+  const misplacements = useMemo(() => {
+    if (!currentVolumeId) return [];
+    return detectMisplacements(currentVolumeId);
+  }, [currentVolumeId, detectMisplacements]);
+
+  const totalIssues = duplicates.length + misplacements.length;
+
+  const handleIgnoreDuplicate = (dupId: string) => {
+    if (window.confirm('确定要忽略此重复提醒吗？')) {
+      ignoreDuplicate(dupId);
+    }
+  };
+
+  const handleIgnoreMisplacement = (misId: string) => {
+    if (window.confirm('确定要忽略此错放提醒吗？')) {
+      ignoreMisplacement(misId);
+    }
+  };
+
+  const handleMoveToCategory = (docId: string, toCatId: string) => {
+    if (window.confirm('确定要将此文件移动到建议的分类吗？')) {
+      moveDocumentToCategory(docId, toCatId);
+    }
+  };
 
   const toggleCategory = (categoryId: string) => {
     const newExpanded = new Set(expandedCategories);
@@ -453,6 +493,135 @@ const VolumeListPage: React.FC = () => {
                 </div>
               </div>
             </div>
+
+            {totalIssues > 0 && showIssuesPanel && (
+              <div className="bg-amber-50 border border-amber-200 rounded-xl p-4">
+                <div className="flex items-center justify-between mb-3">
+                  <div className="flex items-center space-x-2">
+                    <AlertTriangle className="w-5 h-5 text-amber-600" />
+                    <span className="font-medium text-amber-900">
+                      发现 {totalIssues} 个归档问题
+                    </span>
+                  </div>
+                  <button
+                    onClick={() => setShowIssuesPanel(false)}
+                    className="text-amber-500 hover:text-amber-700"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+
+                {duplicates.length > 0 && (
+                  <div className="mb-4">
+                    <h5 className="text-sm font-medium text-amber-800 mb-2 flex items-center space-x-1">
+                      <Copy className="w-4 h-4" />
+                      <span>重复文件 ({duplicates.length})</span>
+                    </h5>
+                    <div className="space-y-2">
+                      {duplicates.slice(0, 3).map((dup) => (
+                        <div
+                          key={dup.id}
+                          className="bg-white rounded-lg p-3 border border-amber-100"
+                        >
+                          <div className="flex items-start justify-between">
+                            <div className="flex-1 min-w-0">
+                              <p className="text-sm font-medium text-gray-900 truncate">
+                                {dup.fileName}
+                              </p>
+                              <p className="text-xs text-gray-500 mt-1">
+                                出现在 {dup.documentNames.length} 个条目中：
+                                {dup.categoryNames.map((name, idx) => (
+                                  <span key={idx} className="text-amber-600">
+                                    {idx > 0 && '、'}「{name}」
+                                  </span>
+                                ))}
+                              </p>
+                            </div>
+                            <div className="flex items-center space-x-1 ml-2 flex-shrink-0">
+                              <button
+                                onClick={() => handleIgnoreDuplicate(dup.id)}
+                                className="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded"
+                                title="忽略此提醒"
+                              >
+                                <EyeOff className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                      {duplicates.length > 3 && (
+                        <p className="text-xs text-amber-600">
+                          还有 {duplicates.length - 3} 个重复文件...
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {misplacements.length > 0 && (
+                  <div>
+                    <h5 className="text-sm font-medium text-amber-800 mb-2 flex items-center space-x-1">
+                      <FileQuestion className="w-4 h-4" />
+                      <span>可能错放分类 ({misplacements.length})</span>
+                    </h5>
+                    <div className="space-y-2">
+                      {misplacements.slice(0, 3).map((mis) => (
+                        <div
+                          key={mis.id}
+                          className="bg-white rounded-lg p-3 border border-amber-100"
+                        >
+                          <div className="flex items-start justify-between">
+                            <div className="flex-1 min-w-0">
+                              <p className="text-sm font-medium text-gray-900 truncate">
+                                {mis.documentName}
+                              </p>
+                              <div className="flex items-center space-x-2 mt-1 text-xs">
+                                <span className="text-gray-500">{mis.currentCategoryName}</span>
+                                <ArrowRight className="w-3 h-3 text-amber-400" />
+                                <span className="text-amber-600 font-medium">{mis.suggestedCategoryName}</span>
+                              </div>
+                              <p className="text-xs text-gray-400 mt-1">
+                                {mis.reason}
+                              </p>
+                            </div>
+                            <div className="flex items-center space-x-1 ml-2 flex-shrink-0">
+                              <button
+                                onClick={() => handleMoveToCategory(mis.documentId, mis.suggestedCategoryId)}
+                                className="px-2 py-1 text-xs bg-amber-600 text-white rounded hover:bg-amber-700 transition-colors"
+                              >
+                                移动
+                              </button>
+                              <button
+                                onClick={() => handleIgnoreMisplacement(mis.id)}
+                                className="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded"
+                                title="忽略此提醒"
+                              >
+                                <EyeOff className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                      {misplacements.length > 3 && (
+                        <p className="text-xs text-amber-600">
+                          还有 {misplacements.length - 3} 个可能错放...
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {totalIssues > 0 && !showIssuesPanel && (
+              <button
+                onClick={() => setShowIssuesPanel(true)}
+                className="w-full py-2 bg-amber-50 border border-amber-200 text-amber-700 rounded-lg hover:bg-amber-100 transition-colors text-sm flex items-center justify-center space-x-2"
+              >
+                <AlertTriangle className="w-4 h-4" />
+                <span>显示 {totalIssues} 个归档问题</span>
+              </button>
+            )}
 
             {showBatchUpload && pendingUploads.length > 0 && (
               <div className="bg-white rounded-xl border border-emerald-200 shadow-sm overflow-hidden">

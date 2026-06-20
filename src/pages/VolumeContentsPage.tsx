@@ -18,10 +18,20 @@ import {
   Settings,
   Printer,
   GripVertical,
-  Layers
+  Layers,
+  Save,
+  History,
+  GitCompare,
+  Trash2,
+  RotateCcw,
+  ChevronDown,
+  ChevronRight,
+  X,
+  FileWarning
 } from 'lucide-react';
 import useProjectStore from '../store/useProjectStore';
 import StatusBadge from '../components/StatusBadge';
+import type { IssueDetail } from '../types';
 
 type ViewMode = 'directory' | 'cover' | 'checklist';
 
@@ -38,6 +48,12 @@ const VolumeContentsPage: React.FC = () => {
     generateChecklist,
     getProjectStats,
     getVolumeDocuments,
+    getIssueSummaries,
+    saveDirectoryVersion,
+    getVolumeVersions,
+    restoreVersion,
+    compareVersions,
+    deleteVersion,
   } = useProjectStore();
 
   const [viewMode, setViewMode] = useState<ViewMode>('directory');
@@ -45,6 +61,14 @@ const VolumeContentsPage: React.FC = () => {
   const [dragIndex, setDragIndex] = useState<number | null>(null);
   const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
   const tableRef = useRef<HTMLDivElement>(null);
+  const [showVersionPanel, setShowVersionPanel] = useState(false);
+  const [showSaveVersionModal, setShowSaveVersionModal] = useState(false);
+  const [versionName, setVersionName] = useState('');
+  const [versionDesc, setVersionDesc] = useState('');
+  const [compareVersion1, setCompareVersion1] = useState<string | null>(null);
+  const [compareVersion2, setCompareVersion2] = useState<string | null>(null);
+  const [showCompareModal, setShowCompareModal] = useState(false);
+  const [expandedIssueTypes, setExpandedIssueTypes] = useState<Set<string>>(new Set());
 
   const currentProject = projects.find((p) => p.id === currentProjectId);
   const projectVolumes = currentProjectId ? volumes[currentProjectId] || [] : [];
@@ -60,6 +84,94 @@ const VolumeContentsPage: React.FC = () => {
   }, [activeVolumeId, getVolumeDocuments]);
 
   const uploadedDocuments = allDocuments.filter((d) => d.status === '已上传');
+
+  const versions = useMemo(() => {
+    if (!activeVolumeId) return [];
+    return getVolumeVersions(activeVolumeId);
+  }, [activeVolumeId, getVolumeVersions]);
+
+  const issueSummaries = useMemo(() => {
+    if (!currentProjectId) return [];
+    return getIssueSummaries(currentProjectId);
+  }, [currentProjectId, getIssueSummaries]);
+
+  const compareDiffs = useMemo(() => {
+    if (!compareVersion1 || !compareVersion2) return [];
+    return compareVersions(compareVersion1, compareVersion2);
+  }, [compareVersion1, compareVersion2, compareVersions]);
+
+  const handleSaveVersion = () => {
+    if (!activeVolumeId || !versionName.trim()) return;
+    saveDirectoryVersion(activeVolumeId, versionName.trim(), versionDesc.trim());
+    setShowSaveVersionModal(false);
+    setVersionName('');
+    setVersionDesc('');
+  };
+
+  const handleRestoreVersion = (versionId: string) => {
+    if (window.confirm('确定要恢复到此版本吗？当前的修改将被覆盖。')) {
+      restoreVersion(versionId);
+    }
+  };
+
+  const handleDeleteVersion = (versionId: string) => {
+    if (window.confirm('确定要删除此版本吗？删除后不可恢复。')) {
+      deleteVersion(versionId);
+    }
+  };
+
+  const startCompare = (versionId: string) => {
+    if (!compareVersion1) {
+      setCompareVersion1(versionId);
+    } else if (!compareVersion2 && versionId !== compareVersion1) {
+      setCompareVersion2(versionId);
+      setShowCompareModal(true);
+    } else {
+      setCompareVersion1(versionId);
+      setCompareVersion2(null);
+    }
+  };
+
+  const toggleIssueType = (type: string) => {
+    const newExpanded = new Set(expandedIssueTypes);
+    if (newExpanded.has(type)) {
+      newExpanded.delete(type);
+    } else {
+      newExpanded.add(type);
+    }
+    setExpandedIssueTypes(newExpanded);
+  };
+
+  const handleJumpToIssue = (issue: IssueDetail) => {
+    if (issue.volumeId) {
+      setSelectedVolumeId(issue.volumeId);
+      setViewMode('directory');
+    }
+  };
+
+  const getChangeTypeLabel = (type: string) => {
+    switch (type) {
+      case 'order': return '顺序变化';
+      case 'page': return '页码变化';
+      case 'notes': return '备注变化';
+      case 'category': return '分类变化';
+      case 'added': return '新增文件';
+      case 'removed': return '移除文件';
+      default: return type;
+    }
+  };
+
+  const getChangeTypeColor = (type: string) => {
+    switch (type) {
+      case 'order': return 'text-blue-600 bg-blue-50';
+      case 'page': return 'text-amber-600 bg-amber-50';
+      case 'notes': return 'text-purple-600 bg-purple-50';
+      case 'category': return 'text-pink-600 bg-pink-50';
+      case 'added': return 'text-green-600 bg-green-50';
+      case 'removed': return 'text-red-600 bg-red-50';
+      default: return 'text-gray-600 bg-gray-50';
+    }
+  };
 
   if (!currentProject || !currentProjectId) {
     return (
@@ -432,6 +544,20 @@ const VolumeContentsPage: React.FC = () => {
                   <Settings className="w-4 h-4" />
                   <span>自动编排页码</span>
                 </button>
+                <button
+                  onClick={() => setShowSaveVersionModal(true)}
+                  className="w-full py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition-colors text-sm font-medium flex items-center justify-center space-x-2"
+                >
+                  <Save className="w-4 h-4" />
+                  <span>保存版本</span>
+                </button>
+                <button
+                  onClick={() => setShowVersionPanel(!showVersionPanel)}
+                  className="w-full py-2 bg-white text-gray-700 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors text-sm font-medium flex items-center justify-center space-x-2"
+                >
+                  <History className="w-4 h-4" />
+                  <span>历史版本 ({versions.length})</span>
+                </button>
                 <div className="text-xs text-gray-500 text-center">
                   拖拽行或用箭头调整顺序
                 </div>
@@ -701,107 +827,476 @@ const VolumeContentsPage: React.FC = () => {
       )}
 
       {viewMode === 'checklist' && (
-        <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
-          <div className="p-6 border-b border-gray-200">
-            <h3 className="text-lg font-semibold text-gray-900">档案馆移交检查清单</h3>
-            <p className="text-sm text-gray-500 mt-1">
-              以下是移交档案馆前需要检查的项目，请逐一核对
-            </p>
-          </div>
+        <div className="space-y-6">
+          <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
+            <div className="p-6 border-b border-gray-200">
+              <h3 className="text-lg font-semibold text-gray-900">档案馆移交检查清单</h3>
+              <p className="text-sm text-gray-500 mt-1">
+                以下是移交档案馆前需要检查的项目，请逐一核对
+              </p>
+            </div>
 
-          <div className="p-6">
-            <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-6">
-              <div className="flex items-start space-x-3">
-                <AlertCircle className="w-5 h-5 text-blue-600 flex-shrink-0 mt-0.5" />
-                <div className="text-sm text-blue-800">
-                  <p className="font-medium">检查说明</p>
-                  <p className="mt-1">
-                    本清单根据《建设工程文件归档规范》GB/T 50328-2014 编制，用于竣工资料移交前的自检。
-                    请根据实际情况核对，确保所有必选项目均已完成。
-                  </p>
+            <div className="p-6">
+              <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-6">
+                <div className="flex items-start space-x-3">
+                  <AlertCircle className="w-5 h-5 text-blue-600 flex-shrink-0 mt-0.5" />
+                  <div className="text-sm text-blue-800">
+                    <p className="font-medium">检查说明</p>
+                    <p className="mt-1">
+                      本清单根据《建设工程文件归档规范》GB/T 50328-2014 编制，用于竣工资料移交前的自检。
+                      请根据实际情况核对，确保所有必选项目均已完成。
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              <table className="w-full">
+                <thead className="bg-gray-50">
+                  <tr>
+                    <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider w-12">
+                      序号
+                    </th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">
+                      检查项目
+                    </th>
+                    <th className="px-4 py-3 text-center text-xs font-semibold text-gray-600 uppercase tracking-wider w-16">
+                      必选
+                    </th>
+                    <th className="px-4 py-3 text-center text-xs font-semibold text-gray-600 uppercase tracking-wider w-24">
+                      检查状态
+                    </th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider w-48">
+                      备注
+                    </th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100">
+                  {checklist.map((item, idx) => (
+                    <tr key={idx} className="hover:bg-gray-50 transition-colors">
+                      <td className="px-4 py-3 text-sm text-gray-500">
+                        {idx + 1}
+                      </td>
+                      <td className="px-4 py-3">
+                        <span className="text-sm font-medium text-gray-900">{item.name}</span>
+                      </td>
+                      <td className="px-4 py-3 text-center">
+                        {item.required ? (
+                          <span className="w-2 h-2 bg-red-500 rounded-full inline-block" title="必选" />
+                        ) : (
+                          <span className="w-2 h-2 bg-gray-300 rounded-full inline-block" title="可选" />
+                        )}
+                      </td>
+                      <td className="px-4 py-3">
+                        <div className="flex items-center justify-center space-x-1">
+                          {getStatusIcon(item.status)}
+                          <span className={`text-sm font-medium ${
+                            item.status === '已完成' ? 'text-green-600' :
+                            item.status === '待检查' ? 'text-amber-600' : 'text-red-600'
+                          }`}>
+                            {item.status}
+                          </span>
+                        </div>
+                      </td>
+                      <td className="px-4 py-3 text-sm text-gray-500">
+                        {item.remark || '-'}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+
+              <div className="mt-6 pt-6 border-t border-gray-200">
+                <div className="grid grid-cols-3 gap-4 text-center">
+                  <div className="p-4 bg-green-50 rounded-lg">
+                    <CheckCircle className="w-8 h-8 text-green-500 mx-auto mb-2" />
+                    <p className="text-2xl font-bold text-green-600">
+                      {checklist.filter((c) => c.status === '已完成').length}
+                    </p>
+                    <p className="text-sm text-green-700">已完成</p>
+                  </div>
+                  <div className="p-4 bg-amber-50 rounded-lg">
+                    <Clock className="w-8 h-8 text-amber-500 mx-auto mb-2" />
+                    <p className="text-2xl font-bold text-amber-600">
+                      {checklist.filter((c) => c.status === '待检查').length}
+                    </p>
+                    <p className="text-sm text-amber-700">待检查</p>
+                  </div>
+                  <div className="p-4 bg-red-50 rounded-lg">
+                    <XCircle className="w-8 h-8 text-red-500 mx-auto mb-2" />
+                    <p className="text-2xl font-bold text-red-600">
+                      {checklist.filter((c) => c.status === '有问题').length}
+                    </p>
+                    <p className="text-sm text-red-700">有问题</p>
+                  </div>
                 </div>
               </div>
             </div>
+          </div>
 
-            <table className="w-full">
-              <thead className="bg-gray-50">
-                <tr>
-                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider w-12">
-                    序号
-                  </th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">
-                    检查项目
-                  </th>
-                  <th className="px-4 py-3 text-center text-xs font-semibold text-gray-600 uppercase tracking-wider w-16">
-                    必选
-                  </th>
-                  <th className="px-4 py-3 text-center text-xs font-semibold text-gray-600 uppercase tracking-wider w-24">
-                    检查状态
-                  </th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider w-48">
-                    备注
-                  </th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-100">
-                {checklist.map((item, idx) => (
-                  <tr key={idx} className="hover:bg-gray-50 transition-colors">
-                    <td className="px-4 py-3 text-sm text-gray-500">
-                      {idx + 1}
-                    </td>
-                    <td className="px-4 py-3">
-                      <span className="text-sm font-medium text-gray-900">{item.name}</span>
-                    </td>
-                    <td className="px-4 py-3 text-center">
-                      {item.required ? (
-                        <span className="w-2 h-2 bg-red-500 rounded-full inline-block" title="必选" />
-                      ) : (
-                        <span className="w-2 h-2 bg-gray-300 rounded-full inline-block" title="可选" />
-                      )}
-                    </td>
-                    <td className="px-4 py-3">
-                      <div className="flex items-center justify-center space-x-1">
-                        {getStatusIcon(item.status)}
-                        <span className={`text-sm font-medium ${
-                          item.status === '已完成' ? 'text-green-600' :
-                          item.status === '待检查' ? 'text-amber-600' : 'text-red-600'
-                        }`}>
-                          {item.status}
-                        </span>
+          <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
+            <div className="p-6 border-b border-gray-200">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="text-lg font-semibold text-gray-900">问题明细汇总</h3>
+                  <p className="text-sm text-gray-500 mt-1">
+                    按问题类型分类统计，点击可跳转到对应资料
+                  </p>
+                </div>
+                <span className="px-3 py-1 bg-red-100 text-red-700 text-sm font-medium rounded-full">
+                  共 {issueSummaries.reduce((acc, s) => acc + s.count, 0)} 个问题
+                </span>
+              </div>
+            </div>
+
+            <div className="p-6">
+              {issueSummaries.length === 0 ? (
+                <div className="text-center py-12">
+                  <CheckCircle className="w-12 h-12 text-green-400 mx-auto mb-3" />
+                  <p className="text-gray-500">太棒了！当前没有发现问题</p>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {issueSummaries.map((summary) => {
+                    const isExpanded = expandedIssueTypes.has(summary.type);
+                    return (
+                      <div key={summary.type} className="border border-gray-200 rounded-lg overflow-hidden">
+                        <button
+                          onClick={() => toggleIssueType(summary.type)}
+                          className="w-full p-4 flex items-center justify-between bg-gray-50 hover:bg-gray-100 transition-colors"
+                        >
+                          <div className="flex items-center space-x-3">
+                            {isExpanded ? (
+                              <ChevronDown className="w-5 h-5 text-gray-400" />
+                            ) : (
+                              <ChevronRight className="w-5 h-5 text-gray-400" />
+                            )}
+                            <FileWarning className="w-5 h-5 text-amber-500" />
+                            <span className="font-medium text-gray-900">{summary.label}</span>
+                          </div>
+                          <span className="px-2.5 py-0.5 bg-amber-100 text-amber-700 text-sm font-medium rounded-full">
+                            {summary.count} 项
+                          </span>
+                        </button>
+                        
+                        {isExpanded && (
+                          <div className="divide-y divide-gray-100">
+                            {summary.issues.map((issue) => (
+                              <div
+                                key={issue.id}
+                                className="p-3 hover:bg-amber-50 cursor-pointer transition-colors"
+                                onClick={() => handleJumpToIssue(issue)}
+                              >
+                                <div className="flex items-start justify-between">
+                                  <div className="flex-1">
+                                    <div className="flex items-center space-x-2">
+                                      <span className="text-sm font-medium text-gray-900">
+                                        {issue.documentName}
+                                      </span>
+                                    </div>
+                                    <div className="mt-1 flex items-center space-x-3 text-xs text-gray-500">
+                                      <span className="px-1.5 py-0.5 bg-gray-100 text-gray-600 rounded">
+                                        {issue.volumeName}
+                                      </span>
+                                      <span className="px-1.5 py-0.5 bg-gray-100 text-gray-600 rounded">
+                                        {issue.categoryName}
+                                      </span>
+                                    </div>
+                                    <p className="mt-1 text-xs text-amber-600">
+                                      {issue.description}
+                                    </p>
+                                  </div>
+                                  <span className="text-xs text-primary-600 flex items-center space-x-1 flex-shrink-0 ml-3">
+                                    <span>跳转</span>
+                                    <ChevronRight className="w-3 h-3" />
+                                  </span>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
                       </div>
-                    </td>
-                    <td className="px-4 py-3 text-sm text-gray-500">
-                      {item.remark || '-'}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
-            <div className="mt-6 pt-6 border-t border-gray-200">
-              <div className="grid grid-cols-3 gap-4 text-center">
-                <div className="p-4 bg-green-50 rounded-lg">
-                  <CheckCircle className="w-8 h-8 text-green-500 mx-auto mb-2" />
-                  <p className="text-2xl font-bold text-green-600">
-                    {checklist.filter((c) => c.status === '已完成').length}
+      {showSaveVersionModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-xl shadow-xl max-w-md w-full mx-4">
+            <div className="p-6 border-b border-gray-200">
+              <div className="flex items-center justify-between">
+                <h3 className="text-lg font-semibold text-gray-900">保存目录版本</h3>
+                <button
+                  onClick={() => {
+                    setShowSaveVersionModal(false);
+                    setVersionName('');
+                    setVersionDesc('');
+                  }}
+                  className="text-gray-400 hover:text-gray-600"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+            </div>
+            <div className="p-6 space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  版本名称 <span className="text-red-500">*</span>
+                </label>
+                <input
+                  type="text"
+                  value={versionName}
+                  onChange={(e) => setVersionName(e.target.value)}
+                  placeholder="例如：初稿、设计院审查后、移交版"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  版本说明
+                </label>
+                <textarea
+                  value={versionDesc}
+                  onChange={(e) => setVersionDesc(e.target.value)}
+                  placeholder="记录本次版本的主要变更内容..."
+                  rows={3}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500 resize-none"
+                />
+              </div>
+              <div className="bg-blue-50 rounded-lg p-3 text-sm text-blue-700">
+                <p className="font-medium">提示</p>
+                <p className="mt-1">
+                  版本将保存当前目录的文件顺序、页码、备注等信息，后续可随时恢复或对比。
+                </p>
+              </div>
+            </div>
+            <div className="p-6 border-t border-gray-200 flex justify-end space-x-3">
+              <button
+                onClick={() => {
+                  setShowSaveVersionModal(false);
+                  setVersionName('');
+                  setVersionDesc('');
+                }}
+                className="px-4 py-2 text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors"
+              >
+                取消
+              </button>
+              <button
+                onClick={handleSaveVersion}
+                disabled={!versionName.trim()}
+                className="px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                保存版本
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showVersionPanel && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-xl shadow-xl max-w-3xl w-full mx-4 max-h-[80vh] flex flex-col">
+            <div className="p-6 border-b border-gray-200">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="text-lg font-semibold text-gray-900">历史版本</h3>
+                  <p className="text-sm text-gray-500 mt-1">
+                    共 {versions.length} 个版本 · 选择两个版本可对比差异
                   </p>
-                  <p className="text-sm text-green-700">已完成</p>
                 </div>
-                <div className="p-4 bg-amber-50 rounded-lg">
-                  <Clock className="w-8 h-8 text-amber-500 mx-auto mb-2" />
-                  <p className="text-2xl font-bold text-amber-600">
-                    {checklist.filter((c) => c.status === '待检查').length}
-                  </p>
-                  <p className="text-sm text-amber-700">待检查</p>
+                <button
+                  onClick={() => {
+                    setShowVersionPanel(false);
+                    setCompareVersion1(null);
+                    setCompareVersion2(null);
+                  }}
+                  className="text-gray-400 hover:text-gray-600"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+            </div>
+            <div className="flex-1 overflow-y-auto p-6">
+              {versions.length === 0 ? (
+                <div className="text-center py-12">
+                  <History className="w-12 h-12 text-gray-300 mx-auto mb-3" />
+                  <p className="text-gray-500">暂无历史版本</p>
+                  <p className="text-sm text-gray-400 mt-1">点击「保存版本」创建第一个版本</p>
                 </div>
-                <div className="p-4 bg-red-50 rounded-lg">
-                  <XCircle className="w-8 h-8 text-red-500 mx-auto mb-2" />
-                  <p className="text-2xl font-bold text-red-600">
-                    {checklist.filter((c) => c.status === '有问题').length}
-                  </p>
-                  <p className="text-sm text-red-700">有问题</p>
+              ) : (
+                <div className="space-y-3">
+                  {versions.map((version) => {
+                    const isSelected1 = compareVersion1 === version.id;
+                    const isSelected2 = compareVersion2 === version.id;
+                    return (
+                      <div
+                        key={version.id}
+                        className={`p-4 border rounded-lg cursor-pointer transition-all ${
+                          isSelected1 || isSelected2
+                            ? 'border-primary-500 bg-primary-50 ring-2 ring-primary-200'
+                            : 'border-gray-200 hover:border-gray-300 hover:bg-gray-50'
+                        }`}
+                        onClick={() => startCompare(version.id)}
+                      >
+                        <div className="flex items-start justify-between">
+                          <div className="flex-1">
+                            <div className="flex items-center space-x-2">
+                              <span className="font-medium text-gray-900">{version.name}</span>
+                              {isSelected1 && (
+                                <span className="px-2 py-0.5 text-xs bg-blue-500 text-white rounded">
+                                  版本 A
+                                </span>
+                              )}
+                              {isSelected2 && (
+                                <span className="px-2 py-0.5 text-xs bg-pink-500 text-white rounded">
+                                  版本 B
+                                </span>
+                              )}
+                            </div>
+                            <p className="text-sm text-gray-500 mt-1">
+                              {version.description || '无版本说明'}
+                            </p>
+                            <div className="mt-2 flex items-center space-x-4 text-xs text-gray-400">
+                              <span>
+                                {new Date(version.createdAt).toLocaleString('zh-CN')}
+                              </span>
+                              <span>
+                                {version.documentSnapshots.length} 个文件
+                              </span>
+                            </div>
+                          </div>
+                          <div className="flex items-center space-x-1 ml-4">
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleRestoreVersion(version.id);
+                              }}
+                              className="p-2 text-gray-400 hover:text-primary-600 hover:bg-primary-50 rounded-lg transition-colors"
+                              title="恢复此版本"
+                            >
+                              <RotateCcw className="w-4 h-4" />
+                            </button>
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleDeleteVersion(version.id);
+                              }}
+                              className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                              title="删除此版本"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+            <div className="p-4 border-t border-gray-200 bg-gray-50">
+              <div className="flex items-center justify-between">
+                <p className="text-sm text-gray-500">
+                  {compareVersion1 && !compareVersion2 && '请再选择一个版本进行对比'}
+                  {compareVersion1 && compareVersion2 && '已选择两个版本，可查看对比'}
+                </p>
+                <div className="flex space-x-2">
+                  <button
+                    onClick={() => {
+                      setCompareVersion1(null);
+                      setCompareVersion2(null);
+                    }}
+                    disabled={!compareVersion1 && !compareVersion2}
+                    className="px-3 py-1.5 text-sm text-gray-600 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    清除选择
+                  </button>
+                  <button
+                    onClick={() => setShowCompareModal(true)}
+                    disabled={!compareVersion1 || !compareVersion2}
+                    className="px-3 py-1.5 text-sm bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center space-x-1"
+                  >
+                    <GitCompare className="w-4 h-4" />
+                    <span>对比差异</span>
+                  </button>
                 </div>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showCompareModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-xl shadow-xl max-w-3xl w-full mx-4 max-h-[80vh] flex flex-col">
+            <div className="p-6 border-b border-gray-200">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="text-lg font-semibold text-gray-900">版本对比</h3>
+                  <p className="text-sm text-gray-500 mt-1">
+                    共 {compareDiffs.length} 处变更
+                  </p>
+                </div>
+                <button
+                  onClick={() => setShowCompareModal(false)}
+                  className="text-gray-400 hover:text-gray-600"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+            </div>
+            <div className="flex-1 overflow-y-auto p-6">
+              {compareDiffs.length === 0 ? (
+                <div className="text-center py-12">
+                  <CheckCircle className="w-12 h-12 text-green-400 mx-auto mb-3" />
+                  <p className="text-gray-500">两个版本完全一致，没有差异</p>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {compareDiffs.map((diff, idx) => (
+                    <div
+                      key={idx}
+                      className="p-3 border border-gray-200 rounded-lg"
+                    >
+                      <div className="flex items-start justify-between">
+                        <div className="flex-1">
+                          <div className="flex items-center space-x-2">
+                            <span className={`px-2 py-0.5 text-xs rounded-full font-medium ${getChangeTypeColor(diff.changeType)}`}>
+                              {getChangeTypeLabel(diff.changeType)}
+                            </span>
+                            <span className="font-medium text-gray-900 text-sm">
+                              {diff.documentName}
+                            </span>
+                          </div>
+                          <div className="mt-1 text-xs text-gray-500">
+                            分类：{diff.categoryName}
+                          </div>
+                        </div>
+                      </div>
+                      {(diff.oldValue !== undefined || diff.newValue !== undefined) && (
+                        <div className="mt-2 grid grid-cols-2 gap-3 text-sm">
+                          {diff.oldValue !== undefined && (
+                            <div className="p-2 bg-red-50 rounded">
+                              <p className="text-xs text-red-500 mb-1">变更前</p>
+                              <p className="text-red-700 font-mono">{String(diff.oldValue)}</p>
+                            </div>
+                          )}
+                          {diff.newValue !== undefined && (
+                            <div className="p-2 bg-green-50 rounded">
+                              <p className="text-xs text-green-500 mb-1">变更后</p>
+                              <p className="text-green-700 font-mono">{String(diff.newValue)}</p>
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
         </div>
