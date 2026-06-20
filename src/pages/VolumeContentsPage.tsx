@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { 
   FolderOpen, 
@@ -16,11 +16,12 @@ import {
   BookOpen,
   FileSpreadsheet,
   Settings,
-  Printer
+  Printer,
+  GripVertical,
+  Layers
 } from 'lucide-react';
 import useProjectStore from '../store/useProjectStore';
 import StatusBadge from '../components/StatusBadge';
-import type { DocumentItem } from '../types';
 
 type ViewMode = 'directory' | 'cover' | 'checklist';
 
@@ -31,24 +32,34 @@ const VolumeContentsPage: React.FC = () => {
     currentVolumeId,
     projects,
     volumes,
-    categories,
-    documents,
     updateDocumentPageNumber,
-    reorderDocuments,
+    reorderDocumentsInVolume,
     reorderVolumes,
     generateChecklist,
     getProjectStats,
+    getVolumeDocuments,
   } = useProjectStore();
 
   const [viewMode, setViewMode] = useState<ViewMode>('directory');
   const [selectedVolumeId, setSelectedVolumeId] = useState<string | null>(null);
+  const [dragIndex, setDragIndex] = useState<number | null>(null);
+  const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
+  const tableRef = useRef<HTMLDivElement>(null);
 
   const currentProject = projects.find((p) => p.id === currentProjectId);
   const projectVolumes = currentProjectId ? volumes[currentProjectId] || [] : [];
   const activeVolumeId = selectedVolumeId || currentVolumeId || projectVolumes[0]?.id;
   const activeVolume = projectVolumes.find((v) => v.id === activeVolumeId);
-  const volumeCategories = activeVolumeId ? categories[activeVolumeId] || [] : [];
   const checklist = currentProjectId ? generateChecklist(currentProjectId) : [];
+
+  const stats = currentProjectId ? getProjectStats(currentProjectId) : { total: 0, uploaded: 0, missing: 0, issues: 0 };
+
+  const allDocuments = useMemo(() => {
+    if (!activeVolumeId) return [];
+    return getVolumeDocuments(activeVolumeId);
+  }, [activeVolumeId, getVolumeDocuments]);
+
+  const uploadedDocuments = allDocuments.filter((d) => d.status === '已上传');
 
   if (!currentProject || !currentProjectId) {
     return (
@@ -66,22 +77,8 @@ const VolumeContentsPage: React.FC = () => {
     );
   }
 
-  const stats = getProjectStats(currentProjectId);
-
-  const allDocuments = useMemo(() => {
-    const docs: (DocumentItem & { categoryName: string })[] = [];
-    volumeCategories.forEach((cat) => {
-      const catDocs = documents[cat.id] || [];
-      catDocs.sort((a, b) => a.order - b.order).forEach((doc) => {
-        docs.push({ ...doc, categoryName: cat.name });
-      });
-    });
-    return docs;
-  }, [volumeCategories, documents]);
-
-  const uploadedDocuments = allDocuments.filter((d) => d.status === '已上传');
-
   const autoAssignPageNumbers = () => {
+    if (!activeVolumeId) return;
     let currentPage = 1;
     allDocuments.forEach((doc) => {
       if (doc.status === '已上传') {
@@ -92,23 +89,17 @@ const VolumeContentsPage: React.FC = () => {
     });
   };
 
-  const moveDocument = (documentId: string, direction: 'up' | 'down') => {
-    const cat = volumeCategories.find((c) => {
-      const docs = documents[c.id] || [];
-      return docs.some((d) => d.id === documentId);
-    });
-    if (!cat) return;
+  const moveDocument = (fromIndex: number, toIndex: number) => {
+    if (!activeVolumeId) return;
+    if (toIndex < 0 || toIndex >= allDocuments.length) return;
+    if (fromIndex === toIndex) return;
 
-    const docs = [...(documents[cat.id] || [])].sort((a, b) => a.order - b.order);
-    const currentIndex = docs.findIndex((d) => d.id === documentId);
-    
-    if (direction === 'up' && currentIndex > 0) {
-      [docs[currentIndex], docs[currentIndex - 1]] = [docs[currentIndex - 1], docs[currentIndex]];
-    } else if (direction === 'down' && currentIndex < docs.length - 1) {
-      [docs[currentIndex], docs[currentIndex + 1]] = [docs[currentIndex + 1], docs[currentIndex]];
-    }
-    
-    reorderDocuments(cat.id, docs.map((d) => d.id));
+    const newOrder = [...allDocuments];
+    const [moved] = newOrder.splice(fromIndex, 1);
+    newOrder.splice(toIndex, 0, moved);
+
+    const docIds = newOrder.map((d) => d.id);
+    reorderDocumentsInVolume(activeVolumeId, docIds);
   };
 
   const moveVolume = (volumeId: string, direction: 'up' | 'down') => {
@@ -122,6 +113,29 @@ const VolumeContentsPage: React.FC = () => {
     }
     
     reorderVolumes(currentProjectId, vols.map((v) => v.id));
+  };
+
+  const handleDragStart = (index: number) => {
+    setDragIndex(index);
+  };
+
+  const handleDragOver = (e: React.DragEvent, index: number) => {
+    e.preventDefault();
+    setDragOverIndex(index);
+  };
+
+  const handleDrop = (e: React.DragEvent, index: number) => {
+    e.preventDefault();
+    if (dragIndex !== null && dragIndex !== index) {
+      moveDocument(dragIndex, index);
+    }
+    setDragIndex(null);
+    setDragOverIndex(null);
+  };
+
+  const handleDragEnd = () => {
+    setDragIndex(null);
+    setDragOverIndex(null);
   };
 
   const getStatusIcon = (status: string) => {
@@ -187,19 +201,13 @@ const VolumeContentsPage: React.FC = () => {
     lines.push('');
     lines.push('-'.repeat(80));
     lines.push('');
-    lines.push('序号\t起止页号\t文件名称\t\t编制单位\t编制日期');
+    lines.push('序号\t分类\t文件名称\t\t起止页号\t编制日期');
     lines.push('-'.repeat(80));
 
     let seqNo = 1;
-    volumeCategories.forEach((cat) => {
-      lines.push('');
-      lines.push(`【${cat.name}】`);
-      
-      const docs = (documents[cat.id] || [])
-        .filter((d) => d.status === '已上传')
-        .sort((a, b) => a.order - b.order);
-      
-      docs.forEach((doc) => {
+    allDocuments
+      .filter((d) => d.status === '已上传')
+      .forEach((doc) => {
         const startPage = doc.pageNumber || '-';
         const pages = doc.file?.pages || 1;
         const endPage = doc.pageNumber ? doc.pageNumber + pages - 1 : '-';
@@ -207,11 +215,10 @@ const VolumeContentsPage: React.FC = () => {
         const date = doc.file?.documentDate || '-';
         
         lines.push(
-          `${seqNo}\t${pageRange}\t\t${doc.name}\t\t-\t${date}`
+          `${seqNo}\t${doc.categoryName}\t${doc.name}\t\t${pageRange}\t${date}`
         );
         seqNo++;
       });
-    });
 
     lines.push('');
     lines.push('='.repeat(80));
@@ -379,6 +386,9 @@ const VolumeContentsPage: React.FC = () => {
                     >
                       <div className="flex items-center justify-between">
                         <div className="flex items-center space-x-2">
+                          <Layers className={`w-4 h-4 ${
+                            activeVolumeId === volume.id ? 'text-primary-600' : 'text-gray-400'
+                          }`} />
                           <span className={`text-sm font-medium ${
                             activeVolumeId === volume.id ? 'text-primary-900' : 'text-gray-700'
                           }`}>
@@ -408,13 +418,13 @@ const VolumeContentsPage: React.FC = () => {
                           </button>
                         </div>
                       </div>
-                      <p className="text-sm text-gray-600 mt-1 ml-0">{volume.name}</p>
+                      <p className="text-sm text-gray-600 mt-1 ml-6">{volume.name}</p>
                     </div>
                   </div>
                 ))}
               </div>
 
-              <div className="p-4 border-t border-gray-200 bg-gray-50">
+              <div className="p-4 border-t border-gray-200 bg-gray-50 space-y-2">
                 <button
                   onClick={autoAssignPageNumbers}
                   className="w-full py-2 bg-gray-800 text-white rounded-lg hover:bg-gray-900 transition-colors text-sm font-medium flex items-center justify-center space-x-2"
@@ -422,6 +432,9 @@ const VolumeContentsPage: React.FC = () => {
                   <Settings className="w-4 h-4" />
                   <span>自动编排页码</span>
                 </button>
+                <div className="text-xs text-gray-500 text-center">
+                  拖拽行或用箭头调整顺序
+                </div>
               </div>
             </div>
           </div>
@@ -442,37 +455,41 @@ const VolumeContentsPage: React.FC = () => {
                       {activeVolume.volumeNumber} {activeVolume.name}
                     </h3>
                     <p className="text-sm text-gray-500 mt-0.5">
-                      共 {uploadedDocuments.length} 份文件已编入目录
+                      共 {allDocuments.length} 份文件，已上传 {uploadedDocuments.length} 份
                     </p>
                   </div>
-                  <div className="text-sm text-gray-500">
-                    点击上下箭头调整顺序
+                  <div className="text-sm text-gray-500 flex items-center space-x-1">
+                    <GripVertical className="w-4 h-4" />
+                    <span>拖拽行可调整顺序</span>
                   </div>
                 </div>
 
-                <div className="flex-1 overflow-y-auto scrollbar-thin">
+                <div ref={tableRef} className="flex-1 overflow-y-auto scrollbar-thin">
                   <table className="w-full">
-                    <thead className="bg-gray-50 sticky top-0">
+                    <thead className="bg-gray-50 sticky top-0 z-10">
                       <tr>
-                        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider w-12">
+                        <th className="px-3 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider w-10">
+                          <span className="sr-only">拖拽</span>
+                        </th>
+                        <th className="px-3 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider w-12">
                           序号
                         </th>
-                        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">
+                        <th className="px-3 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider w-28">
                           分类
                         </th>
-                        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">
+                        <th className="px-3 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">
                           文件名称
                         </th>
-                        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider w-24">
+                        <th className="px-3 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider w-24">
                           状态
                         </th>
-                        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider w-28">
+                        <th className="px-3 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider w-28">
                           编制日期
                         </th>
-                        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider w-24">
+                        <th className="px-3 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider w-32">
                           起止页号
                         </th>
-                        <th className="px-4 py-3 text-center text-xs font-semibold text-gray-600 uppercase tracking-wider w-24">
+                        <th className="px-3 py-3 text-center text-xs font-semibold text-gray-600 uppercase tracking-wider w-20">
                           操作
                         </th>
                       </tr>
@@ -482,66 +499,87 @@ const VolumeContentsPage: React.FC = () => {
                         const startPage = doc.pageNumber || '';
                         const pages = doc.file?.pages || 1;
                         const endPage = doc.pageNumber ? doc.pageNumber + pages - 1 : '';
+                        const isDragging = dragIndex === idx;
+                        const isDragOver = dragOverIndex === idx && dragIndex !== idx;
                         
                         return (
-                          <tr key={doc.id} className="hover:bg-gray-50 transition-colors">
-                            <td className="px-4 py-3 text-sm text-gray-500">
+                          <tr
+                            key={doc.id}
+                            draggable
+                            onDragStart={() => handleDragStart(idx)}
+                            onDragOver={(e) => handleDragOver(e, idx)}
+                            onDrop={(e) => handleDrop(e, idx)}
+                            onDragEnd={handleDragEnd}
+                            className={`transition-all cursor-move select-none ${
+                              isDragging ? 'opacity-50 bg-primary-50' : ''
+                            } ${
+                              isDragOver ? 'border-t-2 border-primary-500 bg-primary-50/50' : ''
+                            } hover:bg-gray-50`}
+                          >
+                            <td className="px-3 py-2.5">
+                              <GripVertical className="w-4 h-4 text-gray-300" />
+                            </td>
+                            <td className="px-3 py-2.5 text-sm text-gray-500 font-mono">
                               {idx + 1}
                             </td>
-                            <td className="px-4 py-3">
+                            <td className="px-3 py-2.5">
                               <span className="px-2 py-1 bg-gray-100 text-gray-600 text-xs rounded">
                                 {doc.categoryName}
                               </span>
                             </td>
-                            <td className="px-4 py-3">
+                            <td className="px-3 py-2.5">
                               <div className="flex items-center space-x-2">
-                                <span className={`w-2 h-2 rounded-full ${
+                                <span className={`w-2 h-2 rounded-full flex-shrink-0 ${
                                   doc.required ? 'bg-red-500' : 'bg-gray-300'
                                 }`} />
                                 <span className="text-sm font-medium text-gray-900">{doc.name}</span>
                               </div>
                               {doc.file && (
-                                <p className="text-xs text-gray-500 mt-1 ml-4">
+                                <p className="text-xs text-gray-500 mt-0.5 ml-4">
                                   {doc.file.name} ({doc.file.type})
                                 </p>
                               )}
                             </td>
-                            <td className="px-4 py-3">
+                            <td className="px-3 py-2.5">
                               <StatusBadge status={doc.status} size="sm" />
                             </td>
-                            <td className="px-4 py-3 text-sm text-gray-600">
+                            <td className="px-3 py-2.5 text-sm text-gray-600">
                               {doc.file?.documentDate || '-'}
                             </td>
-                            <td className="px-4 py-3">
+                            <td className="px-3 py-2.5">
                               {doc.status === '已上传' ? (
-                                <input
-                                  type="number"
-                                  min="1"
-                                  value={startPage}
-                                  onChange={(e) => updateDocumentPageNumber(doc.id, parseInt(e.target.value) || 0)}
-                                  placeholder="页码"
-                                  className="w-20 px-2 py-1 text-sm border border-gray-300 rounded focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
-                                />
+                                <div className="flex items-center space-x-1">
+                                  <input
+                                    type="number"
+                                    min="1"
+                                    value={startPage}
+                                    onChange={(e) => updateDocumentPageNumber(doc.id, parseInt(e.target.value) || 0)}
+                                    placeholder="起页"
+                                    className="w-16 px-2 py-1 text-sm border border-gray-300 rounded focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
+                                  />
+                                  {startPage && endPage && startPage !== endPage && (
+                                    <span className="text-sm text-gray-500">至 {endPage}</span>
+                                  )}
+                                </div>
                               ) : (
                                 <span className="text-gray-400">-</span>
                               )}
-                              {startPage && endPage && startPage !== endPage && (
-                                <span className="text-sm text-gray-500 ml-1">- {endPage}</span>
-                              )}
                             </td>
-                            <td className="px-4 py-3">
-                              <div className="flex items-center justify-center space-x-1">
+                            <td className="px-3 py-2.5">
+                              <div className="flex items-center justify-center space-x-0.5">
                                 <button
-                                  onClick={() => moveDocument(doc.id, 'up')}
+                                  onClick={() => moveDocument(idx, idx - 1)}
                                   disabled={idx === 0}
                                   className="p-1.5 text-gray-400 hover:text-primary-600 hover:bg-primary-50 rounded disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                                  title="上移"
                                 >
                                   <ArrowUp className="w-4 h-4" />
                                 </button>
                                 <button
-                                  onClick={() => moveDocument(doc.id, 'down')}
+                                  onClick={() => moveDocument(idx, idx + 1)}
                                   disabled={idx === allDocuments.length - 1}
                                   className="p-1.5 text-gray-400 hover:text-primary-600 hover:bg-primary-50 rounded disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                                  title="下移"
                                 >
                                   <ArrowDown className="w-4 h-4" />
                                 </button>

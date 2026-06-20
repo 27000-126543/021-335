@@ -35,6 +35,7 @@ export interface DocumentItem {
   pageNumber?: number;
   notes?: string;
   order: number;
+  globalOrder?: number;
 }
 
 export interface Category {
@@ -77,4 +78,27 @@ export interface ArchiveCheckItem {
   required: boolean;
   status: '已完成' | '待检查' | '有问题';
   remark?: string;
+}
+
+export interface PendingUpload {
+  id: string;
+  name: string;
+  type: FileType;
+  size?: number;
+  documentDate?: string;
+  pages?: number;
+  matchedDocumentId?: string;
+  matchedDocumentName?: string;
+  matchScore?: number;
+  matchCategoryId?: string;
+  matchCategoryName?: string;
+}
+
+export interface ProjectBackup {
+  version: string;
+  exportedAt: string;
+  project: ProjectInfo;
+  volumes: Volume[];
+  categories: Record<string, Category[]>;
+  documents: Record<string, DocumentItem[]>;
 }
