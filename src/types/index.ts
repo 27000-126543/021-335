@@ -173,3 +173,13 @@ export interface IssueSummary {
   count: number;
   issues: IssueDetail[];
 }
+
+export interface RestoreRecord {
+  id: string;
+  volumeId: string;
+  versionId: string;
+  versionName: string;
+  restoredAt: string;
+  previousVersionName: string;
+  previousSnapshots: DirectoryVersion['documentSnapshots'];
+}

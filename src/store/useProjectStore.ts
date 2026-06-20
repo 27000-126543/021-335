@@ -17,7 +17,8 @@ import type {
   MisplacedFile,
   IssueDetail,
   IssueSummary,
-  IssueType
+  IssueType,
+  RestoreRecord
 } from '../types';
 import { templates, createId } from '../data/templates';
 
@@ -70,6 +71,7 @@ interface ProjectState {
   directoryVersions: DirectoryVersion[];
   ignoredDuplicates: string[];
   ignoredMisplacements: string[];
+  restoreRecords: RestoreRecord[];
   
   createProject: (data: Omit<ProjectInfo, 'id' | 'createdAt'>) => ProjectInfo;
   deleteProject: (projectId: string) => void;
@@ -139,6 +141,11 @@ interface ProjectState {
   getProjectIssues: (projectId: string) => IssueDetail[];
   getIssueSummaries: (projectId: string) => IssueSummary[];
   
+  moveFileToDocument: (fromDocumentId: string, toDocumentId: string, keepOriginal?: boolean) => void;
+  getLatestRestoreRecord: (volumeId: string) => RestoreRecord | null;
+  getVolumeRestoreRecords: (volumeId: string) => RestoreRecord[];
+  undoRestore: (restoreRecordId: string) => void;
+  
   clearAll: () => void;
 }
 
@@ -155,6 +162,7 @@ const useProjectStore = create<ProjectState>()(
       directoryVersions: [],
       ignoredDuplicates: [],
       ignoredMisplacements: [],
+      restoreRecords: [],
 
       createProject: (data) => {
         const project: ProjectInfo = {
@@ -919,6 +927,35 @@ const useProjectStore = create<ProjectState>()(
         if (!version) return;
 
         const volCategories = state.categories[version.volumeId] || [];
+        const catMap = new Map(volCategories.map((c) => [c.id, c.name]));
+        const previousSnapshots = get().getVolumeDocuments(version.volumeId).map((doc, idx) => ({
+          id: doc.id,
+          name: doc.name,
+          categoryId: doc.categoryId,
+          categoryName: catMap.get(doc.categoryId) || '',
+          order: doc.order,
+          globalOrder: doc.globalOrder ?? idx,
+          pageNumber: doc.pageNumber,
+          filePages: doc.file?.pages,
+          notes: doc.notes,
+          status: doc.status,
+        }));
+
+        const existingVolumes = volCategories.map((c) => state.directoryVersions
+          .filter((v) => v.volumeId === c.volumeId && v.id !== versionId)
+          .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())[0]);
+        const previousVersion = existingVolumes[0];
+
+        const restoreRecord: RestoreRecord = {
+          id: createId(),
+          volumeId: version.volumeId,
+          versionId: version.id,
+          versionName: version.name,
+          restoredAt: new Date().toISOString(),
+          previousVersionName: previousVersion?.name || '（恢复前状态）',
+          previousSnapshots,
+        };
+
         const newDocuments = { ...state.documents };
 
         volCategories.forEach((cat) => {
@@ -959,6 +996,117 @@ const useProjectStore = create<ProjectState>()(
             });
           }
         });
+
+        set({ 
+          documents: newDocuments,
+          restoreRecords: [...state.restoreRecords, restoreRecord],
+        });
+      },
+
+      getLatestRestoreRecord: (volumeId) => {
+        return get().restoreRecords
+          .filter((r) => r.volumeId === volumeId)
+          .sort((a, b) => new Date(b.restoredAt).getTime() - new Date(a.restoredAt).getTime())[0] || null;
+      },
+
+      getVolumeRestoreRecords: (volumeId) => {
+        return get().restoreRecords
+          .filter((r) => r.volumeId === volumeId)
+          .sort((a, b) => new Date(b.restoredAt).getTime() - new Date(a.restoredAt).getTime());
+      },
+
+      undoRestore: (restoreRecordId) => {
+        const state = get();
+        const record = state.restoreRecords.find((r) => r.id === restoreRecordId);
+        if (!record) return;
+
+        const volCategories = state.categories[record.volumeId] || [];
+        const newDocuments = { ...state.documents };
+
+        volCategories.forEach((cat) => {
+          newDocuments[cat.id] = [];
+        });
+
+        const allCurrentDocs = new Map<string, DocumentItem>();
+        Object.values(state.documents).forEach((catDocs) => {
+          catDocs.forEach((doc) => {
+            allCurrentDocs.set(doc.id, doc);
+          });
+        });
+
+        record.previousSnapshots.forEach((snapshot) => {
+          const currentDoc = allCurrentDocs.get(snapshot.id);
+          if (!currentDoc) return;
+          if (!newDocuments[snapshot.categoryId]) {
+            newDocuments[snapshot.categoryId] = [];
+          }
+
+          const doc = { ...currentDoc };
+          doc.categoryId = snapshot.categoryId;
+          doc.order = snapshot.order;
+          doc.globalOrder = snapshot.globalOrder;
+          doc.pageNumber = snapshot.pageNumber;
+          doc.notes = snapshot.notes;
+          if (doc.file) {
+            doc.file = { ...doc.file, pages: snapshot.filePages };
+          }
+          newDocuments[snapshot.categoryId].push(doc);
+        });
+
+        volCategories.forEach((cat) => {
+          if (newDocuments[cat.id]) {
+            newDocuments[cat.id].sort((a, b) => (a.globalOrder ?? a.order) - (b.globalOrder ?? b.order));
+            newDocuments[cat.id].forEach((doc, idx) => {
+              doc.order = idx;
+            });
+          }
+        });
+
+        set({ documents: newDocuments });
+      },
+
+      moveFileToDocument: (fromDocumentId, toDocumentId, keepOriginal = false) => {
+        const state = get();
+        const fromFound = findDocumentById(state.documents, fromDocumentId);
+        const toFound = findDocumentById(state.documents, toDocumentId);
+        if (!fromFound || !toFound || !fromFound.doc.file) return;
+
+        const preservedGlobalOrder = fromFound.doc.globalOrder;
+        const originalFile = { ...fromFound.doc.file };
+        const newDocuments = { ...state.documents };
+
+        const fromDocs = [...newDocuments[fromFound.categoryId]];
+        fromDocs[fromFound.index] = {
+          ...fromFound.doc,
+          file: keepOriginal ? originalFile : undefined,
+          status: keepOriginal ? fromFound.doc.status : '未上传',
+        };
+        if (!keepOriginal) {
+          fromDocs[fromFound.index].pageNumber = undefined;
+        }
+        newDocuments[fromFound.categoryId] = fromDocs;
+
+        const toDocs = [...newDocuments[toFound.categoryId]];
+        const targetDoc = { ...toDocs[toFound.index] };
+        targetDoc.file = originalFile;
+        targetDoc.status = computeDocumentStatus(originalFile, targetDoc);
+        if (preservedGlobalOrder !== undefined) {
+          targetDoc.globalOrder = preservedGlobalOrder;
+        }
+        toDocs[toFound.index] = targetDoc;
+        newDocuments[toFound.categoryId] = toDocs;
+
+        const dupKey = `dup_${originalFile.name.toLowerCase()}_${originalFile.type}`;
+        const stillDuplicated = Object.values(newDocuments).some((catDocs) =>
+          catDocs.filter((d) => d.file && d.file.name.toLowerCase() === originalFile.name.toLowerCase() && d.file.type === originalFile.type).length > 1
+        );
+        if (!stillDuplicated && state.ignoredDuplicates.includes(dupKey)) {
+          set((s) => ({
+            documents: newDocuments,
+            ignoredDuplicates: s.ignoredDuplicates.filter((k) => k !== dupKey),
+          }));
+          return;
+        }
 
         set({ documents: newDocuments });
       },
@@ -1170,8 +1318,13 @@ const useProjectStore = create<ProjectState>()(
               let matchedKws: string[] = [];
               matchTexts.forEach((text) => {
                 keywords.forEach((kw) => {
-                  if (text.includes(kw.toLowerCase())) {
-                    score += 10;
+                  const kwLower = kw.toLowerCase();
+                  if (text === kwLower || text.includes(kwLower + '.') || text.startsWith(kwLower) || text.includes(kwLower)) {
+                    if (text === kwLower || (text.length - kwLower.length <= 8)) {
+                      score += 30;
+                    } else {
+                      score += 10;
+                    }
                     if (!matchedKws.includes(kw)) {
                       matchedKws.push(kw);
                     }
@@ -1197,7 +1350,7 @@ const useProjectStore = create<ProjectState>()(
               }
             });
 
-            if (bestScore >= 20 && bestScore > ownScore && bestCategory) {
+            if (bestScore >= 10 && bestScore > ownScore && bestCategory) {
               const misId = `mis_${doc.id}`;
               if (!ignored.has(misId)) {
                 const targetCat = volCategories.find((c) => c.id === bestCategory);
@@ -1477,6 +1630,7 @@ const useProjectStore = create<ProjectState>()(
           directoryVersions: [],
           ignoredDuplicates: [],
           ignoredMisplacements: [],
+          restoreRecords: [],
         });
       },
     }),

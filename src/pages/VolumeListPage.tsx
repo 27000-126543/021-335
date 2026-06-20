@@ -23,7 +23,9 @@ import {
   Copy,
   FileQuestion,
   ArrowRight,
-  EyeOff
+  EyeOff,
+  ChevronUp,
+  MapPin
 } from 'lucide-react';
 import useProjectStore from '../store/useProjectStore';
 import StatusBadge from '../components/StatusBadge';
@@ -56,6 +58,7 @@ const VolumeListPage: React.FC = () => {
     ignoreDuplicate,
     ignoreMisplacement,
     moveDocumentToCategory,
+    moveFileToDocument,
   } = useProjectStore();
 
   const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set());
@@ -73,6 +76,12 @@ const VolumeListPage: React.FC = () => {
   const [batchDragOver, setBatchDragOver] = useState(false);
   const [selectedPendingId, setSelectedPendingId] = useState<string | null>(null);
   const [showIssuesPanel, setShowIssuesPanel] = useState(true);
+  const [showAllDuplicates, setShowAllDuplicates] = useState(false);
+  const [showAllMisplacements, setShowAllMisplacements] = useState(false);
+  const [movingDupDocId, setMovingDupDocId] = useState<string | null>(null);
+  const [moveTargetCategoryId, setMoveTargetCategoryId] = useState<string>('');
+  const [moveTargetDocId, setMoveTargetDocId] = useState<string>('');
+  const [expandedMisId, setExpandedMisId] = useState<string | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const batchFileInputRef = useRef<HTMLInputElement>(null);
@@ -136,6 +145,16 @@ const VolumeListPage: React.FC = () => {
   const handleMoveToCategory = (docId: string, toCatId: string) => {
     if (window.confirm('确定要将此文件移动到建议的分类吗？')) {
       moveDocumentToCategory(docId, toCatId);
+    }
+  };
+
+  const handleMoveToDocument = (fromDocId: string, toDocId: string, dupId?: string) => {
+    if (window.confirm('确定要将此文件移动到选定条目吗？原位置将恢复为未上传状态。')) {
+      moveFileToDocument(fromDocId, toDocId, false);
+      if (dupId) ignoreDuplicate(dupId);
+      setMovingDupDocId(null);
+      setMoveTargetCategoryId('');
+      setMoveTargetDocId('');
     }
   };
 
@@ -513,12 +532,32 @@ const VolumeListPage: React.FC = () => {
 
                 {duplicates.length > 0 && (
                   <div className="mb-4">
-                    <h5 className="text-sm font-medium text-amber-800 mb-2 flex items-center space-x-1">
-                      <Copy className="w-4 h-4" />
-                      <span>重复文件 ({duplicates.length})</span>
-                    </h5>
+                    <div className="flex items-center justify-between mb-2">
+                      <h5 className="text-sm font-medium text-amber-800 flex items-center space-x-1">
+                        <Copy className="w-4 h-4" />
+                        <span>重复文件 ({duplicates.length})</span>
+                      </h5>
+                      {duplicates.length > 3 && (
+                        <button
+                          onClick={() => setShowAllDuplicates(!showAllDuplicates)}
+                          className="text-xs text-amber-600 hover:text-amber-800 flex items-center space-x-1"
+                        >
+                          {showAllDuplicates ? (
+                            <>
+                              <ChevronUp className="w-3 h-3" />
+                              <span>收起</span>
+                            </>
+                          ) : (
+                            <>
+                              <ChevronDown className="w-3 h-3" />
+                              <span>查看全部</span>
+                            </>
+                          )}
+                        </button>
+                      )}
+                    </div>
                     <div className="space-y-2">
-                      {duplicates.slice(0, 3).map((dup) => (
+                      {(showAllDuplicates ? duplicates : duplicates.slice(0, 3)).map((dup) => (
                         <div
                           key={dup.id}
                           className="bg-white rounded-lg p-3 border border-amber-100"
@@ -528,34 +567,91 @@ const VolumeListPage: React.FC = () => {
                               <p className="text-sm font-medium text-gray-900 truncate">
                                 {dup.fileName}
                               </p>
-                              <div className="mt-1 space-y-1">
-                                {dup.documentIds.map((docId, idx) => (
-                                  <div key={docId} className="flex items-center justify-between text-xs">
-                                    <span className="text-gray-600">
-                                      「{dup.categoryNames[idx]}」- {dup.documentNames[idx]}
-                                    </span>
-                                    {idx > 0 && (
-                                      <select
-                                        className="ml-2 text-xs border border-gray-300 rounded px-1 py-0.5 bg-white max-w-[140px]"
-                                        defaultValue=""
-                                        onChange={(e) => {
-                                          if (e.target.value) {
-                                            moveDocumentToCategory(docId, e.target.value);
-                                            ignoreDuplicate(dup.id);
-                                          }
-                                        }}
-                                      >
-                                        <option value="">移动到...</option>
-                                        {volumeCategories
-                                          .map((cat) => (
-                                            <option key={cat.id} value={cat.id}>
-                                              {cat.name}
-                                            </option>
-                                          ))}
-                                      </select>
-                                    )}
-                                  </div>
-                                ))}
+                              <div className="mt-2 space-y-1">
+                                {dup.documentIds.map((docId, idx) => {
+                                  const isMoving = movingDupDocId === docId;
+                                  return (
+                                    <div key={docId} className="text-xs">
+                                      <div className="flex items-center justify-between">
+                                        <div className="flex items-center space-x-2">
+                                          <span className={idx === 0 ? 'text-green-600 font-medium' : 'text-gray-600'}>
+                                            {idx === 0 ? '✓ 保留' : '重复'} 「{dup.categoryNames[idx]}」- {dup.documentNames[idx]}
+                                          </span>
+                                        </div>
+                                        {idx > 0 && !isMoving && (
+                                          <button
+                                            onClick={() => {
+                                              setMovingDupDocId(docId);
+                                            }}
+                                            className="px-2 py-0.5 text-xs bg-amber-500 text-white rounded hover:bg-amber-600 transition-colors flex items-center space-x-1"
+                                          >
+                                            <MapPin className="w-3 h-3" />
+                                            <span>移到其他条目</span>
+                                          </button>
+                                        )}
+                                      </div>
+                                      {isMoving && (
+                                        <div className="mt-2 p-2 bg-amber-50 rounded border border-amber-100">
+                                          <div className="space-y-2">
+                                            <select
+                                              className="w-full text-xs border border-gray-300 rounded px-2 py-1.5 bg-white"
+                                              value={moveTargetCategoryId}
+                                              onChange={(e) => {
+                                                setMoveTargetCategoryId(e.target.value);
+                                                setMoveTargetDocId('');
+                                              }}
+                                            >
+                                              <option value="">选择分类...</option>
+                                              {volumeCategories.map((cat) => (
+                                                <option key={cat.id} value={cat.id}>
+                                                  {cat.name}
+                                                </option>
+                                              ))}
+                                            </select>
+                                            {moveTargetCategoryId && (
+                                              <select
+                                                className="w-full text-xs border border-gray-300 rounded px-2 py-1.5 bg-white"
+                                                value={moveTargetDocId}
+                                                onChange={(e) => setMoveTargetDocId(e.target.value)}
+                                              >
+                                                <option value="">选择目标条目...</option>
+                                                {(documents[moveTargetCategoryId] || []).map((d) => (
+                                                  <option key={d.id} value={d.id}>
+                                                    {d.name}
+                                                    {d.status === '未上传' ? '（未上传）' : '（已上传）'}
+                                                  </option>
+                                                ))}
+                                              </select>
+                                            )}
+                                            <div className="flex items-center justify-end space-x-2">
+                                              <button
+                                                onClick={() => {
+                                                  setMovingDupDocId(null);
+                                                  setMoveTargetCategoryId('');
+                                                  setMoveTargetDocId('');
+                                                }}
+                                                className="px-2 py-1 text-xs text-gray-600 hover:bg-gray-100 rounded"
+                                              >
+                                                取消
+                                              </button>
+                                              <button
+                                                onClick={() => {
+                                                  if (moveTargetDocId) {
+                                                    handleMoveToDocument(docId, moveTargetDocId, dup.id);
+                                                  }
+                                                }}
+                                                disabled={!moveTargetDocId}
+                                                className="px-2 py-1 text-xs bg-primary-600 text-white rounded hover:bg-primary-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                                              >
+                                                确认移动
+                                              </button>
+                                            </div>
+                                          </div>
+                                        </div>
+                                      )}
+                                    </div>
+                                  );
+                                })}
                               </div>
                             </div>
                             <div className="flex items-center space-x-1 ml-2 flex-shrink-0">
@@ -570,64 +666,89 @@ const VolumeListPage: React.FC = () => {
                           </div>
                         </div>
                       ))}
-                      {duplicates.length > 3 && (
-                        <p className="text-xs text-amber-600">
-                          还有 {duplicates.length - 3} 个重复文件...
-                        </p>
-                      )}
                     </div>
                   </div>
                 )}
 
                 {misplacements.length > 0 && (
                   <div>
-                    <h5 className="text-sm font-medium text-amber-800 mb-2 flex items-center space-x-1">
-                      <FileQuestion className="w-4 h-4" />
-                      <span>可能错放分类 ({misplacements.length})</span>
-                    </h5>
-                    <div className="space-y-2">
-                      {misplacements.slice(0, 3).map((mis) => (
-                        <div
-                          key={mis.id}
-                          className="bg-white rounded-lg p-3 border border-amber-100"
+                    <div className="flex items-center justify-between mb-2">
+                      <h5 className="text-sm font-medium text-amber-800 flex items-center space-x-1">
+                        <FileQuestion className="w-4 h-4" />
+                        <span>可能错放分类 ({misplacements.length})</span>
+                      </h5>
+                      {misplacements.length > 3 && (
+                        <button
+                          onClick={() => setShowAllMisplacements(!showAllMisplacements)}
+                          className="text-xs text-amber-600 hover:text-amber-800 flex items-center space-x-1"
                         >
-                          <div className="flex items-start justify-between">
-                            <div className="flex-1 min-w-0">
-                              <p className="text-sm font-medium text-gray-900 truncate">
-                                {mis.documentName}
-                              </p>
-                              <div className="flex items-center space-x-2 mt-1 text-xs">
-                                <span className="text-gray-500">{mis.currentCategoryName}</span>
-                                <ArrowRight className="w-3 h-3 text-amber-400" />
-                                <span className="text-amber-600 font-medium">{mis.suggestedCategoryName}</span>
+                          {showAllMisplacements ? (
+                            <>
+                              <ChevronUp className="w-3 h-3" />
+                              <span>收起</span>
+                            </>
+                          ) : (
+                            <>
+                              <ChevronDown className="w-3 h-3" />
+                              <span>查看全部</span>
+                            </>
+                          )}
+                        </button>
+                      )}
+                    </div>
+                    <div className="space-y-2">
+                      {(showAllMisplacements ? misplacements : misplacements.slice(0, 3)).map((mis) => {
+                        const isExpanded = expandedMisId === mis.id;
+                        return (
+                          <div
+                            key={mis.id}
+                            className="bg-white rounded-lg p-3 border border-amber-100"
+                          >
+                            <div className="flex items-start justify-between">
+                              <div className="flex-1 min-w-0">
+                                <button
+                                  onClick={() => setExpandedMisId(isExpanded ? null : mis.id)}
+                                  className="w-full text-left"
+                                >
+                                  <p className="text-sm font-medium text-gray-900 truncate">
+                                    {mis.documentName}
+                                  </p>
+                                  <div className="flex items-center space-x-2 mt-1 text-xs">
+                                    <span className="text-gray-500">{mis.currentCategoryName}</span>
+                                    <ArrowRight className="w-3 h-3 text-amber-400" />
+                                    <span className="text-amber-600 font-medium">{mis.suggestedCategoryName}</span>
+                                  </div>
+                                  {isExpanded && (
+                                    <>
+                                      <p className="text-xs text-gray-400 mt-1">
+                                        {mis.reason}
+                                      </p>
+                                      <p className="text-xs text-gray-500 mt-1">
+                                        置信度: {mis.confidence}%
+                                      </p>
+                                    </>
+                                  )}
+                                </button>
                               </div>
-                              <p className="text-xs text-gray-400 mt-1">
-                                {mis.reason}
-                              </p>
-                            </div>
-                            <div className="flex items-center space-x-1 ml-2 flex-shrink-0">
-                              <button
-                                onClick={() => handleMoveToCategory(mis.documentId, mis.suggestedCategoryId)}
-                                className="px-2 py-1 text-xs bg-amber-600 text-white rounded hover:bg-amber-700 transition-colors"
-                              >
-                                移动
-                              </button>
-                              <button
-                                onClick={() => handleIgnoreMisplacement(mis.id)}
-                                className="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded"
-                                title="忽略此提醒"
-                              >
-                                <EyeOff className="w-3.5 h-3.5" />
-                              </button>
+                              <div className="flex items-center space-x-1 ml-2 flex-shrink-0">
+                                <button
+                                  onClick={() => handleMoveToCategory(mis.documentId, mis.suggestedCategoryId)}
+                                  className="px-2 py-1 text-xs bg-amber-600 text-white rounded hover:bg-amber-700 transition-colors"
+                                >
+                                  移到建议分类
+                                </button>
+                                <button
+                                  onClick={() => handleIgnoreMisplacement(mis.id)}
+                                  className="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded"
+                                  title="忽略此提醒"
+                                >
+                                  <EyeOff className="w-3.5 h-3.5" />
+                                </button>
+                              </div>
                             </div>
                           </div>
-                        </div>
-                      ))}
-                      {misplacements.length > 3 && (
-                        <p className="text-xs text-amber-600">
-                          还有 {misplacements.length - 3} 个可能错放...
-                        </p>
-                      )}
+                        );
+                      })}
                     </div>
                   </div>
                 )}

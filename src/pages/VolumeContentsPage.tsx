@@ -27,13 +27,15 @@ import {
   ChevronDown,
   ChevronRight,
   X,
-  FileWarning
+  FileWarning,
+  Package,
+  Undo2
 } from 'lucide-react';
 import useProjectStore from '../store/useProjectStore';
 import StatusBadge from '../components/StatusBadge';
-import type { IssueDetail } from '../types';
+import type { IssueDetail, IssueSummary } from '../types';
 
-type ViewMode = 'directory' | 'cover' | 'checklist';
+type ViewMode = 'directory' | 'cover' | 'checklist' | 'package';
 
 const VolumeContentsPage: React.FC = () => {
   const navigate = useNavigate();
@@ -54,6 +56,8 @@ const VolumeContentsPage: React.FC = () => {
     restoreVersion,
     compareVersions,
     deleteVersion,
+    getLatestRestoreRecord,
+    undoRestore,
   } = useProjectStore();
 
   const [viewMode, setViewMode] = useState<ViewMode>('directory');
@@ -118,6 +122,18 @@ const VolumeContentsPage: React.FC = () => {
   const handleDeleteVersion = (versionId: string) => {
     if (window.confirm('确定要删除此版本吗？删除后不可恢复。')) {
       deleteVersion(versionId);
+    }
+  };
+
+  const latestRestoreRecord = useMemo(() => {
+    if (!activeVolumeId) return null;
+    return getLatestRestoreRecord(activeVolumeId);
+  }, [activeVolumeId, getLatestRestoreRecord]);
+
+  const handleUndoRestore = () => {
+    if (!latestRestoreRecord) return;
+    if (window.confirm('确定要撤回到恢复前的状态吗？')) {
+      undoRestore(latestRestoreRecord.id);
     }
   };
 
@@ -414,6 +430,17 @@ const VolumeContentsPage: React.FC = () => {
               <CheckCircle className="w-4 h-4" />
               <span>检查清单</span>
             </button>
+            <button
+              onClick={() => setViewMode('package')}
+              className={`px-4 py-2 rounded-md text-sm font-medium transition-colors flex items-center space-x-2 ${
+                viewMode === 'package'
+                  ? 'bg-white text-primary-600 shadow-sm'
+                  : 'text-gray-600 hover:text-gray-900'
+              }`}
+            >
+              <Package className="w-4 h-4" />
+              <span>移交包预览</span>
+            </button>
           </div>
 
           {viewMode === 'directory' && (
@@ -441,6 +468,43 @@ const VolumeContentsPage: React.FC = () => {
             >
               <Download className="w-4 h-4" />
               <span>导出检查清单</span>
+            </button>
+          )}
+          {viewMode === 'package' && (
+            <button
+              onClick={() => {
+                const parts: string[] = [];
+                if (currentProject && activeVolume) {
+                  parts.push(`案卷封面 - ${activeVolume.volumeNumber} ${activeVolume.name}`);
+                  parts.push(generateDirectoryText());
+                  const issues = issueSummaries.filter((s) =>
+                    s.issues.some((i) => i.volumeId === activeVolumeId)
+                  );
+                  parts.push(`\n\n问题清单\n${'='.repeat(80)}\n`);
+                  issues.forEach((s) => {
+                    parts.push(`\n【${s.label}】共 ${s.count} 项：`);
+                    s.issues
+                      .filter((i) => i.volumeId === activeVolumeId)
+                      .forEach((issue) => {
+                        parts.push(`  · ${issue.documentName} - ${issue.description}`);
+                      });
+                  });
+                  parts.push(`\n\n检查清单\n${'='.repeat(80)}\n`);
+                  checklist.forEach((item, idx) => {
+                    parts.push(`${idx + 1}. ${item.name} - ${item.status}${item.remark ? ' - ' + item.remark : ''}`);
+                  });
+                }
+                const content = parts.join('\n');
+                const blob = new Blob([content], { type: 'text/plain;charset=utf-8;' });
+                const link = document.createElement('a');
+                link.href = URL.createObjectURL(blob);
+                link.download = `移交包_${activeVolume?.name || '案卷'}_${new Date().toISOString().split('T')[0]}.txt`;
+                link.click();
+              }}
+              className="inline-flex items-center space-x-2 px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition-colors shadow-sm"
+            >
+              <Download className="w-4 h-4" />
+              <span>导出移交包</span>
             </button>
           )}
         </div>
@@ -555,6 +619,25 @@ const VolumeContentsPage: React.FC = () => {
               </div>
 
               <div className="p-4 border-t border-gray-200 bg-gray-50 space-y-2">
+                {latestRestoreRecord && (
+                  <div className="p-2 bg-blue-50 border border-blue-200 rounded-lg">
+                    <div className="flex items-center justify-between">
+                      <div className="text-xs text-blue-800">
+                        <p className="font-medium">已恢复到「{latestRestoreRecord.versionName}」</p>
+                        <p className="text-blue-600 mt-0.5">
+                          {new Date(latestRestoreRecord.restoredAt).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}
+                        </p>
+                      </div>
+                      <button
+                        onClick={handleUndoRestore}
+                        className="p-1.5 text-blue-600 hover:bg-blue-100 rounded transition-colors"
+                        title="撤回到恢复前状态"
+                      >
+                        <Undo2 className="w-4 h-4" />
+                      </button>
+                    </div>
+                  </div>
+                )}
                 <button
                   onClick={autoAssignPageNumbers}
                   className="w-full py-2 bg-gray-800 text-white rounded-lg hover:bg-gray-900 transition-colors text-sm font-medium flex items-center justify-center space-x-2"
@@ -1318,6 +1401,202 @@ const VolumeContentsPage: React.FC = () => {
                   ))}
                 </div>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {viewMode === 'package' && (
+        <div className="space-y-6">
+          <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
+            <div className="p-6 border-b border-gray-200">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="text-lg font-semibold text-gray-900 flex items-center space-x-2">
+                    <Package className="w-5 h-5 text-primary-600" />
+                    <span>移交包预览</span>
+                  </h3>
+                  <p className="text-sm text-gray-500 mt-1">
+                    查看案卷完整内容：封面信息、卷内目录、检查清单、问题清单
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <div className="p-6 space-y-6">
+              <div className="bg-gradient-to-br from-primary-50 to-primary-100 border border-primary-200 rounded-xl p-6">
+                <h4 className="text-base font-semibold text-primary-900 mb-4 flex items-center space-x-2">
+                  <BookOpen className="w-5 h-5" />
+                  <span>案卷封面信息</span>
+                </h4>
+                <div className="grid grid-cols-2 gap-4 text-sm">
+                  <div>
+                    <span className="text-primary-600">工程名称：</span>
+                    <span className="text-primary-900 font-medium">{currentProject?.projectName}</span>
+                  </div>
+                  <div>
+                    <span className="text-primary-600">标段：</span>
+                    <span className="text-primary-900 font-medium">{currentProject?.section}</span>
+                  </div>
+                  <div>
+                    <span className="text-primary-600">单位工程：</span>
+                    <span className="text-primary-900 font-medium">{currentProject?.unitProject}</span>
+                  </div>
+                  <div>
+                    <span className="text-primary-600">分部分项：</span>
+                    <span className="text-primary-900 font-medium">{currentProject?.subDivision}</span>
+                  </div>
+                  <div>
+                    <span className="text-primary-600">案卷号：</span>
+                    <span className="text-primary-900 font-medium">{activeVolume?.volumeNumber}</span>
+                  </div>
+                  <div>
+                    <span className="text-primary-600">案卷名称：</span>
+                    <span className="text-primary-900 font-medium">{activeVolume?.name}</span>
+                  </div>
+                </div>
+                <div className="mt-4 grid grid-cols-4 gap-3 text-center">
+                  <div className="bg-white/80 rounded-lg p-3">
+                    <p className="text-2xl font-bold text-primary-700">{allDocuments.length}</p>
+                    <p className="text-xs text-primary-600">文件总数</p>
+                  </div>
+                  <div className="bg-white/80 rounded-lg p-3">
+                    <p className="text-2xl font-bold text-green-600">{uploadedDocuments.length}</p>
+                    <p className="text-xs text-green-700">已上传</p>
+                  </div>
+                  <div className="bg-white/80 rounded-lg p-3">
+                    <p className="text-2xl font-bold text-red-600">{stats.missing}</p>
+                    <p className="text-xs text-red-700">未上传</p>
+                  </div>
+                  <div className="bg-white/80 rounded-lg p-3">
+                    <p className="text-2xl font-bold text-amber-600">{stats.issues}</p>
+                    <p className="text-xs text-amber-700">待处理问题</p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="border border-gray-200 rounded-xl overflow-hidden">
+                <div className="bg-gray-50 px-6 py-3 border-b border-gray-200 flex items-center justify-between">
+                  <h4 className="text-base font-semibold text-gray-900 flex items-center space-x-2">
+                    <FileSpreadsheet className="w-5 h-5 text-gray-600" />
+                    <span>卷内目录（共 {uploadedDocuments.length} 份已上传）</span>
+                  </h4>
+                </div>
+                <div className="max-h-80 overflow-y-auto">
+                  <table className="w-full">
+                    <thead className="bg-gray-50 sticky top-0">
+                      <tr>
+                        <th className="px-4 py-2 text-left text-xs font-semibold text-gray-600 w-12">序号</th>
+                        <th className="px-4 py-2 text-left text-xs font-semibold text-gray-600 w-28">分类</th>
+                        <th className="px-4 py-2 text-left text-xs font-semibold text-gray-600">文件名称</th>
+                        <th className="px-4 py-2 text-left text-xs font-semibold text-gray-600 w-24">状态</th>
+                        <th className="px-4 py-2 text-left text-xs font-semibold text-gray-600 w-24">起止页</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-100">
+                      {allDocuments.map((doc, idx) => (
+                        <tr key={doc.id} className="hover:bg-gray-50">
+                          <td className="px-4 py-2 text-sm text-gray-500">{idx + 1}</td>
+                          <td className="px-4 py-2 text-sm text-gray-600">{doc.categoryName}</td>
+                          <td className="px-4 py-2 text-sm text-gray-900 font-medium">{doc.name}</td>
+                          <td className="px-4 py-2">
+                            <StatusBadge status={doc.status} />
+                          </td>
+                          <td className="px-4 py-2 text-sm text-gray-600 font-mono">
+                            {doc.status === '已上传' && doc.pageNumber
+                              ? `${doc.pageNumber}-${doc.pageNumber + (doc.file?.pages || 1) - 1}`
+                              : '-'}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-6">
+                <div className="border border-gray-200 rounded-xl overflow-hidden">
+                  <div className="bg-gray-50 px-6 py-3 border-b border-gray-200">
+                    <h4 className="text-base font-semibold text-gray-900 flex items-center space-x-2">
+                      <CheckCircle className="w-5 h-5 text-gray-600" />
+                      <span>档案馆检查清单</span>
+                    </h4>
+                  </div>
+                  <div className="p-4 space-y-2 max-h-64 overflow-y-auto">
+                    {checklist.map((item, idx) => (
+                      <div key={idx} className="flex items-center justify-between py-1.5 border-b border-gray-50 last:border-0">
+                        <span className="text-sm text-gray-700 flex items-center space-x-2">
+                          {item.required && <span className="w-1.5 h-1.5 bg-red-500 rounded-full" />}
+                          <span>{item.name}</span>
+                        </span>
+                        <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
+                          item.status === '已完成'
+                            ? 'bg-green-100 text-green-700'
+                            : item.status === '待检查'
+                            ? 'bg-amber-100 text-amber-700'
+                            : 'bg-red-100 text-red-700'
+                        }`}>
+                          {item.status}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="border border-gray-200 rounded-xl overflow-hidden">
+                  <div className="bg-gray-50 px-6 py-3 border-b border-gray-200 flex items-center justify-between">
+                    <h4 className="text-base font-semibold text-gray-900 flex items-center space-x-2">
+                      <AlertTriangle className="w-5 h-5 text-gray-600" />
+                      <span>本卷问题清单</span>
+                    </h4>
+                    <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
+                      issueSummaries.filter((s) => s.issues.some((i) => i.volumeId === activeVolumeId)).length > 0
+                        ? 'bg-red-100 text-red-700'
+                        : 'bg-green-100 text-green-700'
+                    }`}>
+                      {issueSummaries.reduce((acc, s) => acc + s.issues.filter((i) => i.volumeId === activeVolumeId).length, 0)} 项
+                    </span>
+                  </div>
+                  <div className="p-4 max-h-64 overflow-y-auto">
+                    {issueSummaries.filter((s) => s.issues.some((i) => i.volumeId === activeVolumeId)).length === 0 ? (
+                      <div className="text-center py-6">
+                        <CheckCircle className="w-8 h-8 text-green-400 mx-auto mb-2" />
+                        <p className="text-sm text-gray-500">本卷没有待处理问题</p>
+                      </div>
+                    ) : (
+                      <div className="space-y-3">
+                        {issueSummaries
+                          .filter((s) => s.issues.some((i) => i.volumeId === activeVolumeId))
+                          .map((summary: IssueSummary) => (
+                            <div key={summary.type}>
+                              <div className="flex items-center justify-between text-xs mb-1">
+                                <span className="font-medium text-gray-700">{summary.label}</span>
+                                <span className="px-1.5 py-0.5 bg-amber-100 text-amber-700 rounded-full">
+                                  {summary.issues.filter((i) => i.volumeId === activeVolumeId).length} 项
+                                </span>
+                              </div>
+                              <div className="pl-2 space-y-1">
+                                {summary.issues
+                                  .filter((i) => i.volumeId === activeVolumeId)
+                                  .slice(0, 3)
+                                  .map((issue) => (
+                                    <div key={issue.id} className="text-xs text-gray-600 truncate">
+                                      · {issue.documentName} - {issue.description}
+                                    </div>
+                                  ))}
+                                {summary.issues.filter((i) => i.volumeId === activeVolumeId).length > 3 && (
+                                  <div className="text-xs text-gray-400">
+                                    还有 {summary.issues.filter((i) => i.volumeId === activeVolumeId).length - 3} 项...
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
         </div>
