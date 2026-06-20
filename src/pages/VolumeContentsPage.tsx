@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useRef } from 'react';
+import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { 
   FolderOpen, 
@@ -69,6 +69,7 @@ const VolumeContentsPage: React.FC = () => {
   const [compareVersion2, setCompareVersion2] = useState<string | null>(null);
   const [showCompareModal, setShowCompareModal] = useState(false);
   const [expandedIssueTypes, setExpandedIssueTypes] = useState<Set<string>>(new Set());
+  const [highlightDocId, setHighlightDocId] = useState<string | null>(null);
 
   const currentProject = projects.find((p) => p.id === currentProjectId);
   const projectVolumes = currentProjectId ? volumes[currentProjectId] || [] : [];
@@ -146,8 +147,25 @@ const VolumeContentsPage: React.FC = () => {
     if (issue.volumeId) {
       setSelectedVolumeId(issue.volumeId);
       setViewMode('directory');
+      setHighlightDocId(issue.documentId);
     }
   };
+
+  useEffect(() => {
+    if (!highlightDocId) return;
+    const timer = setTimeout(() => {
+      setHighlightDocId(null);
+    }, 5000);
+    return () => clearTimeout(timer);
+  }, [highlightDocId]);
+
+  useEffect(() => {
+    if (!highlightDocId || !tableRef.current) return;
+    const el = tableRef.current.querySelector(`[data-doc-id="${highlightDocId}"]`);
+    if (el) {
+      el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+  }, [highlightDocId, activeVolumeId, allDocuments]);
 
   const getChangeTypeLabel = (type: string) => {
     switch (type) {
@@ -631,6 +649,7 @@ const VolumeContentsPage: React.FC = () => {
                         return (
                           <tr
                             key={doc.id}
+                            data-doc-id={doc.id}
                             draggable
                             onDragStart={() => handleDragStart(idx)}
                             onDragOver={(e) => handleDragOver(e, idx)}
@@ -640,6 +659,8 @@ const VolumeContentsPage: React.FC = () => {
                               isDragging ? 'opacity-50 bg-primary-50' : ''
                             } ${
                               isDragOver ? 'border-t-2 border-primary-500 bg-primary-50/50' : ''
+                            } ${
+                              highlightDocId === doc.id ? 'bg-amber-100 ring-2 ring-amber-400 ring-inset' : ''
                             } hover:bg-gray-50`}
                           >
                             <td className="px-3 py-2.5">

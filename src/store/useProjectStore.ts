@@ -925,19 +925,30 @@ const useProjectStore = create<ProjectState>()(
           newDocuments[cat.id] = [];
         });
 
+        const allCurrentDocs = new Map<string, DocumentItem>();
+        Object.values(state.documents).forEach((catDocs) => {
+          catDocs.forEach((doc) => {
+            allCurrentDocs.set(doc.id, doc);
+          });
+        });
+
         version.documentSnapshots.forEach((snapshot) => {
-          const found = findDocumentById(state.documents, snapshot.id);
-          if (found && newDocuments[snapshot.categoryId]) {
-            const doc = { ...found.doc };
-            doc.order = snapshot.order;
-            doc.globalOrder = snapshot.globalOrder;
-            doc.pageNumber = snapshot.pageNumber;
-            doc.notes = snapshot.notes;
-            if (doc.file) {
-              doc.file = { ...doc.file, pages: snapshot.filePages };
-            }
-            newDocuments[snapshot.categoryId].push(doc);
+          const currentDoc = allCurrentDocs.get(snapshot.id);
+          if (!currentDoc) return;
+          if (!newDocuments[snapshot.categoryId]) {
+            newDocuments[snapshot.categoryId] = [];
           }
+
+          const doc = { ...currentDoc };
+          doc.categoryId = snapshot.categoryId;
+          doc.order = snapshot.order;
+          doc.globalOrder = snapshot.globalOrder;
+          doc.pageNumber = snapshot.pageNumber;
+          doc.notes = snapshot.notes;
+          if (doc.file) {
+            doc.file = { ...doc.file, pages: snapshot.filePages };
+          }
+          newDocuments[snapshot.categoryId].push(doc);
         });
 
         volCategories.forEach((cat) => {
@@ -1087,51 +1098,106 @@ const useProjectStore = create<ProjectState>()(
         const misplacements: MisplacedFile[] = [];
 
         const categoryKeywords: Record<string, string[]> = {
-          '开工报审文件': ['开工', '报审', '施工许可', '开工报告'],
-          '技术管理文件': ['施工组织', '技术交底', '图纸会审', '设计变更', '洽商', '方案'],
-          '质量事故处理记录': ['事故', '质量事故'],
-          '建筑与结构': ['钢材', '水泥', '砂', '石', '混凝土', '砂浆', '砖', '砌块', '防水', '门窗', '节能', '保温', '钢筋'],
-          '给排水与采暖': ['给水', '排水', '采暖', '管道', '通水', '灌水', '满水', '试压', '管材', '管件'],
-          '建筑电气': ['电气', '接地', '绝缘', '照明', '灯具', '电线', '电缆'],
-          '通风与空调': ['通风', '空调', '风管', '漏光', '漏风', '调试'],
-          '地基基础工程': ['地基', '基础', '土方', '桩', '混凝土垫层'],
-          '主体结构工程': ['钢筋', '预埋件', '钢结构', '墙体拉结筋'],
-          '建筑装饰装修工程': ['抹灰', '门窗安装', '吊顶', '轻质隔墙', '饰面板', '饰面砖'],
+          '开工报审文件': ['开工', '报审', '施工许可', '开工报告', '施工组织设计报审'],
+          '技术管理文件': ['施工组织', '技术交底', '图纸会审', '设计变更', '洽商', '方案', '专项施工'],
+          '质量事故处理记录': ['事故', '质量事故', '事故处理'],
+          '建筑与结构': ['钢材', '水泥', '砂', '石', '混凝土', '砂浆', '砖', '砌块', '防水', '门窗', '节能', '保温', '钢筋', '配合比', '外加剂', '粉煤灰'],
+          '给排水与采暖': ['给水', '排水', '采暖', '管道', '通水', '灌水', '满水', '试压', '管材', '管件', '卫生器具'],
+          '建筑电气': ['电气', '接地', '绝缘', '照明', '灯具', '电线', '电缆', '通电试运行'],
+          '通风与空调': ['通风', '空调', '风管', '漏光', '漏风', '调试', '试运行'],
+          '地基基础工程': ['地基', '基础', '土方', '桩', '混凝土垫层', '地基处理'],
+          '主体结构工程': ['钢筋', '预埋件', '钢结构', '墙体拉结筋', '钢筋连接'],
+          '建筑装饰装修工程': ['抹灰', '门窗安装', '吊顶', '轻质隔墙', '饰面板', '饰面砖', '基层'],
           '屋面工程': ['屋面', '找平层', '保温层', '防水层', '细部构造'],
           '建筑节能工程': ['节能', '墙体节能', '门窗节能', '屋面节能', '地面节能'],
-          '机电安装工程': ['给排水', '电气管线', '通风空调', '消防', '管线'],
-          '建筑竣工图': ['建筑总平面', '建筑平面', '建筑立面', '建筑剖面', '建筑详图'],
-          '结构竣工图': ['基础平面', '基础详图', '结构平面', '结构详图'],
-          '机电安装竣工图': ['给排水竣工', '电气竣工', '通风空调竣工', '消防竣工'],
-          '分部工程验收': ['分部', '验收记录'],
-          '竣工验收': ['竣工', '竣工验收', '备案', '观感', '控制资料', '安全和功能'],
+          '机电安装工程': ['给排水', '电气管线', '通风空调', '消防', '管线', '管线敷设'],
+          '建筑竣工图': ['建筑总平面', '建筑平面', '建筑立面', '建筑剖面', '建筑详图', '竣工图'],
+          '结构竣工图': ['基础平面', '基础详图', '结构平面', '结构详图', '竣工图'],
+          '机电安装竣工图': ['给排水竣工', '电气竣工', '通风空调竣工', '消防竣工', '竣工图'],
+          '分部工程验收': ['分部', '验收记录', '工程验收'],
+          '竣工验收': ['竣工验收', '备案', '观感', '控制资料', '安全和功能', '竣工验收报告', '竣工报告', '验收报告'],
+          '道路工程': ['道路', '路基', '路面', '基层', '面层', '沥青'],
+          '桥梁工程': ['桥梁', '墩台', '预应力', '锚夹具'],
+          '管线工程': ['管线', '管道基础', '检查井', '严密性'],
+          '道路工程隐蔽': ['路基隐蔽', '基层隐蔽', '面层隐蔽'],
+          '桥梁工程隐蔽': ['基础隐蔽', '墩台隐蔽'],
+          '管线工程隐蔽': ['沟槽', '管道基础隐蔽', '管道安装隐蔽', '检查井隐蔽'],
+          '抹灰工程': ['水泥', '砂', '外加剂', '抹灰'],
+          '门窗工程': ['门窗', '三性', '玻璃', '五金', '密封'],
+          '吊顶工程': ['龙骨', '吊顶', '防火涂料'],
+          '轻质隔墙工程': ['隔墙', '龙骨', '填充'],
+          '饰面板（砖）工程': ['石材', '陶瓷砖', '胶粘剂', '填缝'],
+          '涂饰工程': ['涂料', '腻子', '环保'],
+          '裱糊与软包工程': ['壁纸', '墙布', '软包'],
+          '细部工程': ['橱柜', '窗帘盒', '护栏', '花饰'],
         };
+
+        const currentCatKeywords: Record<string, string[]> = {};
+        volCategories.forEach((cat) => {
+          currentCatKeywords[cat.id] = categoryKeywords[cat.name] || [];
+          const catDocs = state.documents[cat.id] || [];
+          catDocs.forEach((doc) => {
+            if (!currentCatKeywords[cat.id].includes(doc.name)) {
+              currentCatKeywords[cat.id].push(doc.name);
+            }
+          });
+        });
 
         volCategories.forEach((cat) => {
           const docs = state.documents[cat.id] || [];
           docs.forEach((doc) => {
             if (!doc.file) return;
 
+            const matchTexts = [doc.name.toLowerCase(), doc.file.name.toLowerCase()];
+            const ownKeywords = currentCatKeywords[cat.id] || [];
+            let ownScore = 0;
+            matchTexts.forEach((text) => {
+              ownKeywords.forEach((kw) => {
+                if (text.includes(kw.toLowerCase())) {
+                  ownScore += 5;
+                }
+              });
+            });
+
             let bestCategory = '';
             let bestScore = 0;
-            const fileName = doc.name.toLowerCase();
+            let bestReason = '';
 
             volCategories.forEach((targetCat) => {
               if (targetCat.id === cat.id) return;
               const keywords = categoryKeywords[targetCat.name] || [];
               let score = 0;
-              keywords.forEach((kw) => {
-                if (fileName.includes(kw.toLowerCase())) {
-                  score += 10;
-                }
+              let matchedKws: string[] = [];
+              matchTexts.forEach((text) => {
+                keywords.forEach((kw) => {
+                  if (text.includes(kw.toLowerCase())) {
+                    score += 10;
+                    if (!matchedKws.includes(kw)) {
+                      matchedKws.push(kw);
+                    }
+                  }
+                });
               });
+
+              const targetDocs = state.documents[targetCat.id] || [];
+              targetDocs.forEach((targetDoc) => {
+                matchTexts.forEach((text) => {
+                  if (text.includes(targetDoc.name.toLowerCase())) {
+                    score += 8;
+                  }
+                });
+              });
+
               if (score > bestScore) {
                 bestScore = score;
                 bestCategory = targetCat.id;
+                bestReason = matchedKws.length > 0
+                  ? `文件名包含「${matchedKws.slice(0, 3).join('、')}」等关键词`
+                  : '';
               }
             });
 
-            if (bestScore >= 20 && bestCategory) {
+            if (bestScore >= 20 && bestScore > ownScore && bestCategory) {
               const misId = `mis_${doc.id}`;
               if (!ignored.has(misId)) {
                 const targetCat = volCategories.find((c) => c.id === bestCategory);
@@ -1143,7 +1209,7 @@ const useProjectStore = create<ProjectState>()(
                   currentCategoryName: cat.name,
                   suggestedCategoryId: bestCategory,
                   suggestedCategoryName: targetCat?.name || '',
-                  reason: `文件名包含多个「${targetCat?.name || ''}」相关关键词`,
+                  reason: bestReason || `文件名更匹配「${targetCat?.name || ''}」分类`,
                   confidence: Math.min(bestScore, 100),
                 });
               }
@@ -1173,6 +1239,8 @@ const useProjectStore = create<ProjectState>()(
 
         if (found.categoryId === toCategoryId) return;
 
+        const preservedGlobalOrder = found.doc.globalOrder;
+
         const newDocuments = { ...state.documents };
         const fromDocs = [...newDocuments[found.categoryId]];
         const docIndex = fromDocs.findIndex((d) => d.id === documentId);
@@ -1184,6 +1252,9 @@ const useProjectStore = create<ProjectState>()(
 
         const toDocs = [...(newDocuments[toCategoryId] || [])];
         const updatedDoc = { ...movedDoc, categoryId: toCategoryId };
+        if (preservedGlobalOrder !== undefined) {
+          updatedDoc.globalOrder = preservedGlobalOrder;
+        }
         toDocs.push(updatedDoc);
         toDocs.forEach((d, i) => { d.order = i; });
         newDocuments[toCategoryId] = toDocs;

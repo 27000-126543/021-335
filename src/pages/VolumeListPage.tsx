@@ -528,14 +528,35 @@ const VolumeListPage: React.FC = () => {
                               <p className="text-sm font-medium text-gray-900 truncate">
                                 {dup.fileName}
                               </p>
-                              <p className="text-xs text-gray-500 mt-1">
-                                出现在 {dup.documentNames.length} 个条目中：
-                                {dup.categoryNames.map((name, idx) => (
-                                  <span key={idx} className="text-amber-600">
-                                    {idx > 0 && '、'}「{name}」
-                                  </span>
+                              <div className="mt-1 space-y-1">
+                                {dup.documentIds.map((docId, idx) => (
+                                  <div key={docId} className="flex items-center justify-between text-xs">
+                                    <span className="text-gray-600">
+                                      「{dup.categoryNames[idx]}」- {dup.documentNames[idx]}
+                                    </span>
+                                    {idx > 0 && (
+                                      <select
+                                        className="ml-2 text-xs border border-gray-300 rounded px-1 py-0.5 bg-white max-w-[140px]"
+                                        defaultValue=""
+                                        onChange={(e) => {
+                                          if (e.target.value) {
+                                            moveDocumentToCategory(docId, e.target.value);
+                                            ignoreDuplicate(dup.id);
+                                          }
+                                        }}
+                                      >
+                                        <option value="">移动到...</option>
+                                        {volumeCategories
+                                          .map((cat) => (
+                                            <option key={cat.id} value={cat.id}>
+                                              {cat.name}
+                                            </option>
+                                          ))}
+                                      </select>
+                                    )}
+                                  </div>
                                 ))}
-                              </p>
+                              </div>
                             </div>
                             <div className="flex items-center space-x-1 ml-2 flex-shrink-0">
                               <button
